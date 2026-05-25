@@ -46,6 +46,14 @@ export type Database = {
         | 'redemption';
       call_direction: 'inbound' | 'outbound';
       call_purpose: 'intake' | 'match_confirmation' | 'happy_call';
+      notification_channel:
+        | 'kakao'
+        | 'sms'
+        | 'push'
+        | 'voice'
+        | 'email'
+        | 'in_app';
+      notification_status: 'pending' | 'sent' | 'failed' | 'skipped';
     };
     Tables: {
       profiles: {
@@ -344,6 +352,58 @@ export type Database = {
           },
         ];
       };
+      notifications: {
+        Row: {
+          id: string;
+          recipient_profile_id: string | null;
+          help_request_id: string | null;
+          assignment_id: string | null;
+          channel: Database['public']['Enums']['notification_channel'];
+          purpose: string;
+          status: Database['public']['Enums']['notification_status'];
+          payload: Json | null;
+          sent_at: string | null;
+          failed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          recipient_profile_id?: string | null;
+          help_request_id?: string | null;
+          assignment_id?: string | null;
+          channel: Database['public']['Enums']['notification_channel'];
+          purpose: string;
+          status?: Database['public']['Enums']['notification_status'];
+          payload?: Json | null;
+          sent_at?: string | null;
+          failed_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'notifications_recipient_profile_id_fkey';
+            columns: ['recipient_profile_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'notifications_help_request_id_fkey';
+            columns: ['help_request_id'];
+            isOneToOne: false;
+            referencedRelation: 'help_requests';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'notifications_assignment_id_fkey';
+            columns: ['assignment_id'];
+            isOneToOne: false;
+            referencedRelation: 'assignments';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -354,6 +414,36 @@ export type Database = {
           p_help_request_id: string;
         };
         Returns: string;
+      };
+      review_help_request: {
+        Args: {
+          p_help_request_id: string;
+          p_status: Database['public']['Enums']['help_request_status'];
+        };
+        Returns: string;
+      };
+      list_published_help_requests: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          id: string;
+          requester_id: string;
+          source: Database['public']['Enums']['request_source'];
+          status: Database['public']['Enums']['help_request_status'];
+          category: Database['public']['Enums']['help_category'];
+          title: string;
+          content: string;
+          items_provided: boolean | null;
+          items_needed_details: string | null;
+          appointment_time: string | null;
+          appointment_timezone: string;
+          location_public: string | null;
+          credit_reward: number;
+          created_at: string;
+          published_at: string | null;
+          requester_name: string;
+          requester_village: string;
+          requester_address_public: string | null;
+        }[];
       };
       submit_completion: {
         Args: {

@@ -246,12 +246,34 @@ export async function onRequestPost({ request, env }: PagesContext) {
     .update({ help_request_id: helpRequest.id })
     .eq('id', voiceCall.id);
 
+  const { error: notificationError } = await supabase
+    .from('notifications')
+    .insert({
+      recipient_profile_id: null,
+      help_request_id: helpRequest.id,
+      assignment_id: null,
+      channel: 'in_app',
+      purpose: 'voice_request_created',
+      status: 'pending',
+      payload: {
+        title: normalizedRequest.value.title,
+        requester_name: requester.name,
+        requester_phone: requester.phone,
+        appointment_time: normalizedRequest.value.appointment_time,
+        credit_reward: normalizedRequest.value.credit_reward,
+        source: 'voice',
+        confidence: toConfidence(extracted?.confidence),
+      } satisfies Json,
+    });
+
   return jsonResponse(
     {
       ok: true,
       voice_call_id: voiceCall.id,
       help_request_id: helpRequest.id,
       status: 'pending_review',
+      notification_created: !notificationError,
+      notification_error: notificationError?.message,
     },
     201,
   );
