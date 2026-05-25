@@ -3,3 +3,15 @@ dist
 .env
 .env.local
 .DS_Store
+.wrangler/state/v3/cache/miniflare-CacheObject/metadata.sqlite
+.wrangler/state/v3/cache/miniflare-CacheObject/metadata.sqlite-shm
+.wrangler/state/v3/cache/miniflare-CacheObject/metadata.sqlite-wal
+.wrangler/tmp/bundle-XVnLzH/middleware-insertion-facade.js
+.wrangler/tmp/bundle-XVnLzH/middleware-loader.entry.ts
+.wrangler/tmp/bundle-YnV9jW/middleware-insertion-facade.js
+.wrangler/tmp/bundle-YnV9jW/middleware-loader.entry.ts
+.wrangler/tmp/dev-Nfj0Et/functionsWorker-0.40778175643318293.js
+.wrangler/tmp/dev-Nfj0Et/functionsWorker-0.40778175643318293.js.map
+.wrangler/tmp/pages-0KDMkb/functionsRoutes-0.09759922903169493.mjs
+.wrangler/tmp/pages-0KDMkb/functionsWorker-0.40778175643318293.mjs
+.wrangler/tmp/pages-0KDMkb/functionsWorker-0.40778175643318293.mjs.map
