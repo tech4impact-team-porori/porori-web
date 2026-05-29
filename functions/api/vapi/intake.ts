@@ -43,6 +43,8 @@ type RequesterLookup = {
   created: boolean;
 };
 
+const doumStructuredOutputName = 'doum_help_request';
+
 const jsonHeaders = {
   'content-type': 'application/json; charset=utf-8',
 };
@@ -301,6 +303,11 @@ function verifyWebhookSecret(
 }
 
 function extractStructuredRequest(payload: unknown): ExtractedRequest | null {
+  const structuredOutputResult = extractStructuredOutputResult(payload);
+  if (structuredOutputResult) {
+    return structuredOutputResult;
+  }
+
   const candidates = [
     getPath(payload, ['message', 'analysis', 'structuredData']),
     getPath(payload, ['message', 'call', 'analysis', 'structuredData']),
@@ -316,6 +323,71 @@ function extractStructuredRequest(payload: unknown): ExtractedRequest | null {
     if (record) {
       return record as ExtractedRequest;
     }
+  }
+
+  return null;
+}
+
+function extractStructuredOutputResult(
+  payload: unknown,
+): ExtractedRequest | null {
+  const candidates = [
+    getPath(payload, ['message', 'artifact', 'structuredOutputs']),
+    getPath(payload, ['message', 'analysis', 'structuredOutputs']),
+    getPath(payload, ['message', 'structuredOutputs']),
+    getPath(payload, ['artifact', 'structuredOutputs']),
+    getPath(payload, ['analysis', 'structuredOutputs']),
+    getPath(payload, ['structuredOutputs']),
+  ];
+
+  for (const candidate of candidates) {
+    const result = selectStructuredOutputResult(candidate);
+    if (result) {
+      return result;
+    }
+  }
+
+  return selectStructuredOutputResult(payload);
+}
+
+function selectStructuredOutputResult(value: unknown): ExtractedRequest | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const directResult = asStructuredRequest(record);
+  if (directResult) {
+    return directResult;
+  }
+
+  const outputEntries = Object.values(record).map(asRecord).filter(Boolean);
+  const namedOutput = outputEntries.find(
+    (entry) => getString(entry, 'name') === doumStructuredOutputName,
+  );
+  const namedResult = asStructuredRequest(namedOutput?.result);
+  if (namedResult) {
+    return namedResult;
+  }
+
+  for (const entry of outputEntries) {
+    const result = asStructuredRequest(entry?.result);
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
+}
+
+function asStructuredRequest(value: unknown): ExtractedRequest | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  if (toTrimmedString(record.title) && toTrimmedString(record.content)) {
+    return record as ExtractedRequest;
   }
 
   return null;
