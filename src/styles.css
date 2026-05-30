@@ -114,6 +114,17 @@ label {
   font-weight: 800;
 }
 
+.required-marker {
+  color: #d83a3a;
+  font-weight: 900;
+}
+
+.field-help {
+  color: #8a4d00;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 h1,
 h2,
 h3,
@@ -324,10 +335,18 @@ p {
 }
 
 .helper-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  align-items: center;
+  gap: 28px;
   border-color: #baf5f2;
   background:
     linear-gradient(135deg, rgba(0, 211, 205, 0.16), rgba(255, 255, 255, 0.92)),
     #ffffff;
+}
+
+.helper-hero-copy {
+  min-width: 0;
 }
 
 .admin-hero {
@@ -345,6 +364,14 @@ p {
 
 .dashboard-grid > .hero-panel,
 .dashboard-grid > .activity-panel {
+  grid-column: 1 / -1;
+}
+
+.helper-dashboard {
+  grid-template-columns: 1fr;
+}
+
+.helper-dashboard > .panel {
   grid-column: 1 / -1;
 }
 
@@ -434,19 +461,19 @@ p {
 }
 
 .filter-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
-  overflow-x: auto;
   padding-bottom: 2px;
 }
 
 button.filter-chip {
-  flex: 0 0 auto;
-  min-height: 36px;
+  min-height: 38px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 13px;
   background: #ffffff;
   color: var(--ink);
+  padding: 0 14px;
   box-shadow: none;
   font-size: 0.84rem;
 }
@@ -495,6 +522,22 @@ button.filter-chip.active {
 .credit-panel {
   display: grid;
   gap: 8px;
+}
+
+.hero-credit-panel {
+  align-self: stretch;
+  align-content: center;
+  border-left: 1px solid rgba(0, 211, 205, 0.24);
+  padding-left: 26px;
+}
+
+.hero-credit-panel .section-header {
+  margin-bottom: 10px;
+}
+
+.hero-credit-panel .section-header button {
+  min-height: 36px;
+  padding-inline: 13px;
 }
 
 .credit-total {
@@ -797,6 +840,27 @@ button.filter-chip.active {
     grid-template-columns: 1fr;
     gap: 14px;
     padding: 0 24px 24px;
+  }
+
+  .helper-hero {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .hero-credit-panel {
+    border-left: 0;
+    border-top: 1px solid rgba(0, 211, 205, 0.24);
+    padding: 16px 0 0;
+  }
+
+  .filter-row {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  button.filter-chip {
+    flex: 0 0 auto;
+    border-radius: 999px;
   }
 
   .panel,

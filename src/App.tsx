@@ -680,18 +680,23 @@ function HelperDashboard({ profile }: { profile: Profile }) {
   const displayName = shortDisplayName(profile.name);
 
   return (
-    <div className="dashboard-grid">
+    <div className="dashboard-grid helper-dashboard">
       <section className="hero-panel helper-hero">
-        <p className="eyebrow">다로리 도움</p>
-        <h1>{displayName}님, 오늘 도울 이웃을 찾아보세요</h1>
-        <p>어르신의 작은 요청을 확인하고, 가능한 일손을 신청하세요.</p>
+        <div className="helper-hero-copy">
+          <p className="eyebrow">다로리 도움</p>
+          <h1>{displayName}님, 오늘도 도울 이웃을 찾아보세요</h1>
+        </div>
+        <CreditSummaryPanel
+          profile={profile}
+          refreshKey={activityRefreshKey}
+          variant="hero"
+        />
       </section>
       <HelperFeed
         profile={profile}
         onAccepted={() => setActivityRefreshKey((current) => current + 1)}
       />
       <HelperAssignments profile={profile} />
-      <CreditSummaryPanel profile={profile} refreshKey={activityRefreshKey} />
       <ActivityPanel
         audience="helper"
         profile={profile}
@@ -1107,9 +1112,11 @@ function HelperAssignments({ profile }: { profile: Profile }) {
 function CreditSummaryPanel({
   profile,
   refreshKey,
+  variant = 'panel',
 }: {
   profile: Profile;
   refreshKey: number;
+  variant?: 'panel' | 'hero';
 }) {
   const [credits, setCredits] = useState<CreditLedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1142,8 +1149,8 @@ function CreditSummaryPanel({
   const totalCredits = credits.reduce((sum, credit) => sum + credit.amount, 0);
   const latestCredit = credits[0] ?? null;
 
-  return (
-    <section className="panel credit-panel">
+  const content = (
+    <>
       <div className="section-header">
         <div>
           <p className="eyebrow">크레딧 시스템</p>
@@ -1163,6 +1170,16 @@ function CreditSummaryPanel({
       ) : (
         <p className="hint">활동이 승인되면 크레딧이 적립됩니다.</p>
       )}
+    </>
+  );
+
+  if (variant === 'hero') {
+    return <div className="credit-panel hero-credit-panel">{content}</div>;
+  }
+
+  return (
+    <section className="panel credit-panel">
+      {content}
     </section>
   );
 }
@@ -1403,7 +1420,7 @@ function AdminReviewModal({
       <div className="detail-stack">
         <section className="review-grid">
           <label>
-            제목
+            <span>제목 <span className="required-marker">*</span></span>
             <input
               value={form.title}
               onChange={(event) => updateField('title', event.target.value)}
@@ -1425,7 +1442,7 @@ function AdminReviewModal({
             </select>
           </label>
           <label className="review-wide">
-            본문
+            <span>본문 <span className="required-marker">*</span></span>
             <textarea
               value={form.content}
               onChange={(event) => updateField('content', event.target.value)}
@@ -1443,7 +1460,7 @@ function AdminReviewModal({
             />
           </label>
           <label>
-            희망 일시
+            <span>희망 일시 <span className="required-marker">*</span></span>
             <input
               type="datetime-local"
               value={form.appointment_time}
@@ -1453,7 +1470,7 @@ function AdminReviewModal({
             />
           </label>
           <label>
-            필요 인원
+            <span>필요 인원 <span className="required-marker">*</span></span>
             <input
               type="number"
               min={3}
@@ -1477,7 +1494,7 @@ function AdminReviewModal({
             />
           </label>
           <label>
-            예상 크레딧
+            <span>예상 크레딧 <span className="required-marker">*</span></span>
             <input
               type="number"
               min={0}
@@ -1488,7 +1505,7 @@ function AdminReviewModal({
             />
           </label>
           <label>
-            안전 등급
+            <span>안전 등급 <span className="required-marker">*</span></span>
             <select
               value={form.safety_tier}
               onChange={(event) =>
@@ -1501,9 +1518,10 @@ function AdminReviewModal({
                 </option>
               ))}
             </select>
+            <span className="field-help">게시하려면 Tier 2 또는 Tier 3이어야 합니다.</span>
           </label>
           <label>
-            공개 장소
+            <span>공개 장소 <span className="required-marker">*</span></span>
             <input
               value={form.location_public}
               onChange={(event) =>
