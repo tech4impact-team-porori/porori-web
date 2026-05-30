@@ -1589,9 +1589,7 @@ function AdminReviewModal({
           ) : null}
           {latestVoiceCall ? (
             <div className="detail-stack">
-              <p className="transcript">
-                {latestVoiceCall.transcript ?? '저장된 통화 내용이 없습니다.'}
-              </p>
+              <ConversationTranscript transcript={latestVoiceCall.transcript} />
               <JsonBlock
                 label="AI 추출 원본"
                 value={latestVoiceCall.extracted_payload ?? request.ai_extracted_payload}
@@ -1793,9 +1791,7 @@ function RequestDetailModal({
                   </dl>
                   <div>
                     <h5>통화 내용</h5>
-                    <p className="transcript">
-                      {latestVoiceCall.transcript ?? '저장된 통화 내용이 없습니다.'}
-                    </p>
+                    <ConversationTranscript transcript={latestVoiceCall.transcript} />
                   </div>
                   <JsonBlock
                     label="추출 데이터"
@@ -2473,6 +2469,68 @@ function formatBoolean(value: boolean | null | undefined) {
   }
 
   return '-';
+}
+
+type ConversationMessage = {
+  speaker: 'ai' | 'user';
+  text: string;
+};
+
+function ConversationTranscript({
+  transcript,
+}: {
+  transcript: string | null | undefined;
+}) {
+  const messages = parseTranscript(transcript);
+
+  if (!transcript) {
+    return <p className="muted">저장된 통화 내용이 없습니다.</p>;
+  }
+
+  if (messages.length === 0) {
+    return <p className="transcript">{transcript}</p>;
+  }
+
+  return (
+    <div className="conversation-transcript" aria-label="어르신 발화 원문">
+      {messages.map((message, index) => (
+        <div
+          key={`${message.speaker}-${index}`}
+          className={`conversation-row ${message.speaker}`}
+        >
+          <span className="conversation-label">
+            {message.speaker === 'ai' ? 'AI' : '어르신'}
+          </span>
+          <p className="conversation-bubble">{message.text}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function parseTranscript(transcript: string | null | undefined): ConversationMessage[] {
+  if (!transcript) {
+    return [];
+  }
+
+  const turns = [...transcript.matchAll(/\b(AI|User)\s*:\s*/g)];
+  if (turns.length === 0) {
+    return [];
+  }
+
+  return turns
+    .map((turn, index) => {
+      const nextTurn = turns[index + 1];
+      const text = transcript
+        .slice(turn.index + turn[0].length, nextTurn?.index ?? transcript.length)
+        .trim();
+
+      return {
+        speaker: turn[1] === 'AI' ? 'ai' : 'user',
+        text,
+      } satisfies ConversationMessage;
+    })
+    .filter((message) => message.text.length > 0);
 }
 
 function JsonBlock({

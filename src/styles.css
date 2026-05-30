@@ -677,6 +677,62 @@ button.filter-chip.active {
   padding: 12px;
 }
 
+.conversation-transcript {
+  display: grid;
+  gap: 12px;
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fbfbfb;
+  padding: 14px;
+}
+
+.conversation-row {
+  display: grid;
+  gap: 5px;
+  max-width: 82%;
+}
+
+.conversation-row.ai {
+  justify-self: start;
+}
+
+.conversation-row.user {
+  justify-self: end;
+}
+
+.conversation-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.conversation-row.user .conversation-label {
+  justify-self: end;
+}
+
+.conversation-bubble {
+  margin: 0;
+  border: 1px solid #dedede;
+  border-radius: 18px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 11px 13px;
+  line-height: 1.55;
+}
+
+.conversation-row.ai .conversation-bubble {
+  border-top-left-radius: 6px;
+}
+
+.conversation-row.user .conversation-bubble {
+  border-color: var(--mint);
+  border-top-right-radius: 6px;
+  background: var(--mint);
+  color: #ffffff;
+}
+
 .json-block {
   color: #4f4f4f;
   font-size: 0.82rem;
