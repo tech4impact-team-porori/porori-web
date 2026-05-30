@@ -866,39 +866,44 @@ function HelperFeed({
         <p>{nudge}</p>
       </div>
 
-      <div className="filter-row" aria-label="도움 요청 필터">
-        <button
-          type="button"
-          className={category === 'all' ? 'filter-chip active' : 'filter-chip'}
-          onClick={() => setCategory('all')}
-        >
-          전체
-        </button>
-        {helpCategoryOptions.map((option) => (
+      <div className="filter-stack" aria-label="도움 요청 필터">
+        <div className="filter-row category-filter-row">
           <button
-            key={option}
             type="button"
-            className={category === option ? 'filter-chip active' : 'filter-chip'}
-            onClick={() => setCategory(option)}
+            className={category === 'all' ? 'filter-chip active' : 'filter-chip'}
+            onClick={() => setCategory('all')}
           >
-            {categoryLabel(option)}
+            전체
           </button>
-        ))}
-        <button
-          type="button"
-          className={sort === 'distance' ? 'filter-chip active' : 'filter-chip'}
-          onClick={() => setSort(sort === 'distance' ? 'latest' : 'distance')}
-          disabled={coordinates.latitude === null || coordinates.longitude === null}
-        >
-          가까운 순
-        </button>
-        <button
-          type="button"
-          className={newOnly ? 'filter-chip active' : 'filter-chip'}
-          onClick={() => setNewOnly((current) => !current)}
-        >
-          NEW
-        </button>
+          {helpCategoryOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={category === option ? 'filter-chip active' : 'filter-chip'}
+              onClick={() => setCategory(option)}
+            >
+              {categoryLabel(option)}
+            </button>
+          ))}
+        </div>
+        <div className="filter-row filter-toggle-row">
+          <button
+            type="button"
+            className={sort === 'distance' ? 'filter-chip active' : 'filter-chip'}
+            onClick={() => setSort(sort === 'distance' ? 'latest' : 'distance')}
+            disabled={coordinates.latitude === null || coordinates.longitude === null}
+          >
+            가까운 순
+          </button>
+          <button
+            type="button"
+            className={newOnly ? 'filter-chip active' : 'filter-chip'}
+            onClick={() => setNewOnly((current) => !current)}
+            title="게시 후 24시간 이내 요청"
+          >
+            NEW
+          </button>
+        </div>
       </div>
 
       <p className="hint">

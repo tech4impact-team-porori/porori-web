@@ -481,11 +481,20 @@ p {
   font-weight: 900;
 }
 
+.filter-stack {
+  display: grid;
+  gap: 8px;
+}
+
 .filter-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
   padding-bottom: 2px;
+}
+
+.filter-toggle-row {
+  grid-template-columns: repeat(2, minmax(112px, 160px));
 }
 
 button.filter-chip {
@@ -877,6 +886,10 @@ button.filter-chip.active {
   .filter-row {
     display: flex;
     overflow-x: auto;
+  }
+
+  .filter-toggle-row {
+    display: flex;
   }
 
   button.filter-chip {
