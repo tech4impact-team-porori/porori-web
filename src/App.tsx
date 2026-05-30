@@ -1896,14 +1896,40 @@ function CompletionDetailModal({
         {proof ? (
           <section className="detail-section">
             <h4>완료 사진</h4>
-            <ProofImage imagePath={proof.image_path} />
-            <p className="hint">{proof.image_path}</p>
+            <CompletionProofPreview imagePath={proof.image_path} />
           </section>
         ) : (
           <p className="muted">이 활동에 등록된 완료 사진이 없습니다.</p>
         )}
       </div>
     </Modal>
+  );
+}
+
+function CompletionProofPreview({ imagePath }: { imagePath: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="proof-preview">
+      <button
+        type="button"
+        className="secondary"
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        {isOpen ? '사진 숨기기' : '사진 보기'}
+      </button>
+      {isOpen ? (
+        <div className="detail-stack">
+          <ProofImage imagePath={imagePath} />
+          <details className="proof-path-details">
+            <summary>파일 경로</summary>
+            <p className="hint">{imagePath}</p>
+          </details>
+        </div>
+      ) : (
+        <p className="hint">사진을 열 때만 이미지를 불러옵니다.</p>
+      )}
+    </div>
   );
 }
 
@@ -2142,7 +2168,7 @@ function HelperAssignmentCard({
         {proof ? (
           <div>
             <dt>인증 사진</dt>
-            <dd>{proof.image_path}</dd>
+            <dd>제출됨</dd>
           </div>
         ) : null}
       </dl>
@@ -2289,7 +2315,7 @@ function CompletionReviewCard({
         </div>
         <div>
           <dt>인증 사진</dt>
-          <dd>{proof?.image_path ?? '-'}</dd>
+          <dd>{proof ? '제출됨' : '-'}</dd>
         </div>
         <div>
           <dt>활동 후기</dt>

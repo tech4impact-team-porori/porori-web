@@ -821,6 +821,33 @@ button.filter-chip.active {
   background: #f6f7f8;
 }
 
+.proof-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.proof-preview > button {
+  justify-self: start;
+}
+
+.proof-path-details {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfbfb;
+  padding: 10px 12px;
+}
+
+.proof-path-details summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.proof-path-details p {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .map-preview {
   position: relative;
   min-height: 190px;
