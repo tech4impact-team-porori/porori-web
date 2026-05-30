@@ -1936,20 +1936,20 @@ function Modal({
 }) {
   return (
     <div className="modal-backdrop" role="presentation">
+      <button
+        type="button"
+        className="modal-close"
+        onClick={onClose}
+        aria-label="닫기"
+      >
+        X
+      </button>
       <section
         className="modal-panel"
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
-        <button
-          type="button"
-          className="modal-close"
-          onClick={onClose}
-          aria-label="닫기"
-        >
-          X
-        </button>
         <div className="section-header">
           <h2>{title}</h2>
         </div>
