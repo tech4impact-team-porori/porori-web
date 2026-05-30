@@ -1358,7 +1358,6 @@ function AdminReviewModal({
       location_longitude: form.location_longitude
         ? Number(form.location_longitude)
         : null,
-      credit_reward: Number(form.credit_reward),
       required_helpers: Number(form.required_helpers),
       safety_tier: form.safety_tier,
       estimated_duration_minutes: Number(form.estimated_duration_minutes),
@@ -1414,6 +1413,10 @@ function AdminReviewModal({
   }
 
   const latestVoiceCall = voiceCalls[0] ?? null;
+  const baseCreditPreview = calculateBaseCredit(
+    form.category,
+    Number(form.estimated_duration_minutes),
+  );
 
   return (
     <Modal title="공고 검토" onClose={onClose}>
@@ -1494,15 +1497,11 @@ function AdminReviewModal({
             />
           </label>
           <label>
-            <span>예상 크레딧 <span className="required-marker">*</span></span>
-            <input
-              type="number"
-              min={0}
-              value={form.credit_reward}
-              onChange={(event) =>
-                updateField('credit_reward', event.target.value)
-              }
-            />
+            예상 크레딧
+            <div className="readonly-field">{formatCredits(baseCreditPreview)}</div>
+            <span className="field-help">
+              카테고리와 예상 시간으로 자동 계산됩니다. 거리 보상은 청년별 위치 기준으로 더해집니다.
+            </span>
           </label>
           <label>
             <span>안전 등급 <span className="required-marker">*</span></span>
@@ -2392,6 +2391,18 @@ function assignmentStatusLabel(status: AssignmentRow['status']) {
 
 function formatCredits(value: number) {
   return `${new Intl.NumberFormat('ko-KR').format(value)} 크레딧`;
+}
+
+function calculateBaseCredit(category: HelpCategory, durationMinutes: number) {
+  const duration = Math.max(Number.isFinite(durationMinutes) ? durationMinutes : 60, 15);
+  const multiplier =
+    category === 'labor'
+      ? 1.5
+      : category === 'daily_life' || category === 'household'
+        ? 1.2
+        : 1.0;
+
+  return Math.round(15480 * (duration / 60) * multiplier);
 }
 
 function formatDistance(value: number) {
