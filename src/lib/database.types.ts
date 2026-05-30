@@ -31,10 +31,13 @@ export type Database = {
         | 'mobility_care'
         | 'household'
         | 'other';
+      safety_tier: 'tier_1' | 'tier_2' | 'tier_3' | 'needs_review';
       assignment_status:
+        | 'applied'
         | 'accepted'
         | 'completed_submitted'
         | 'confirmed'
+        | 'rejected'
         | 'cancelled'
         | 'disputed';
       completion_proof_status: 'submitted' | 'approved' | 'rejected';
@@ -68,6 +71,12 @@ export type Database = {
           address_detail: string | null;
           latitude: number | null;
           longitude: number | null;
+          personal_notes: string | null;
+          consent_info: boolean | null;
+          consent_voice: boolean | null;
+          consent_photo: boolean | null;
+          consent_doc_url: string | null;
+          registered_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -82,6 +91,12 @@ export type Database = {
           address_detail?: string | null;
           latitude?: number | null;
           longitude?: number | null;
+          personal_notes?: string | null;
+          consent_info?: boolean | null;
+          consent_voice?: boolean | null;
+          consent_photo?: boolean | null;
+          consent_doc_url?: string | null;
+          registered_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -104,7 +119,14 @@ export type Database = {
           appointment_timezone: string;
           location_public: string | null;
           location_detail: string | null;
+          location_latitude: number | null;
+          location_longitude: number | null;
           credit_reward: number;
+          required_helpers: number;
+          safety_tier: Database['public']['Enums']['safety_tier'];
+          reject_reason: string | null;
+          rejected_at: string | null;
+          estimated_duration_minutes: number;
           ai_extracted_payload: Json | null;
           admin_notes: string | null;
           created_at: string;
@@ -127,7 +149,14 @@ export type Database = {
           appointment_timezone?: string;
           location_public?: string | null;
           location_detail?: string | null;
+          location_latitude?: number | null;
+          location_longitude?: number | null;
           credit_reward?: number;
+          required_helpers?: number;
+          safety_tier?: Database['public']['Enums']['safety_tier'];
+          reject_reason?: string | null;
+          rejected_at?: string | null;
+          estimated_duration_minutes?: number;
           ai_extracted_payload?: Json | null;
           admin_notes?: string | null;
           created_at?: string;
@@ -159,7 +188,8 @@ export type Database = {
           help_request_id: string;
           helper_id: string;
           status: Database['public']['Enums']['assignment_status'];
-          accepted_at: string;
+          applied_at: string;
+          accepted_at: string | null;
           completed_at: string | null;
           cancelled_at: string | null;
           created_at: string;
@@ -170,7 +200,8 @@ export type Database = {
           help_request_id: string;
           helper_id: string;
           status?: Database['public']['Enums']['assignment_status'];
-          accepted_at?: string;
+          applied_at?: string;
+          accepted_at?: string | null;
           completed_at?: string | null;
           cancelled_at?: string | null;
           created_at?: string;
@@ -415,15 +446,86 @@ export type Database = {
         };
         Returns: string;
       };
+      apply_help_request: {
+        Args: {
+          p_help_request_id: string;
+        };
+        Returns: string;
+      };
+      approve_assignment: {
+        Args: {
+          p_assignment_id: string;
+        };
+        Returns: string;
+      };
+      reject_assignment: {
+        Args: {
+          p_assignment_id: string;
+          p_reason?: string | null;
+        };
+        Returns: string;
+      };
+      admin_update_help_request: {
+        Args: {
+          p_help_request_id: string;
+          p_patch?: Json;
+        };
+        Returns: string;
+      };
+      calculate_help_credit: {
+        Args: {
+          p_category: Database['public']['Enums']['help_category'];
+          p_duration_minutes: number;
+          p_distance_meters?: number | null;
+          p_review_bonus?: boolean | null;
+        };
+        Returns: number;
+      };
+      register_requester_profile: {
+        Args: {
+          p_name: string;
+          p_phone: string;
+          p_village?: string | null;
+          p_address_public?: string | null;
+          p_address_detail?: string | null;
+          p_latitude?: number | null;
+          p_longitude?: number | null;
+          p_personal_notes?: string | null;
+          p_consent_info?: boolean | null;
+          p_consent_voice?: boolean | null;
+          p_consent_photo?: boolean | null;
+          p_consent_doc_url?: string | null;
+        };
+        Returns: string;
+      };
+      straight_line_distance_meters: {
+        Args: {
+          p_lat1: number | null;
+          p_lon1: number | null;
+          p_lat2: number | null;
+          p_lon2: number | null;
+        };
+        Returns: number | null;
+      };
       review_help_request: {
         Args: {
           p_help_request_id: string;
           p_status: Database['public']['Enums']['help_request_status'];
+          p_reject_reason?: string | null;
         };
         Returns: string;
       };
       list_published_help_requests: {
-        Args: Record<PropertyKey, never>;
+        Args: {
+          p_sort?: string | null;
+          p_category?: Database['public']['Enums']['help_category'] | null;
+          p_new_only?: boolean | null;
+          p_limit?: number | null;
+          p_offset?: number | null;
+          p_latitude?: number | null;
+          p_longitude?: number | null;
+          p_search?: string | null;
+        };
         Returns: {
           id: string;
           requester_id: string;
@@ -438,11 +540,25 @@ export type Database = {
           appointment_timezone: string;
           location_public: string | null;
           credit_reward: number;
+          required_helpers: number;
+          safety_tier: Database['public']['Enums']['safety_tier'];
+          location_latitude: number | null;
+          location_longitude: number | null;
+          estimated_duration_minutes: number;
           created_at: string;
           published_at: string | null;
           requester_name: string;
           requester_village: string;
           requester_address_public: string | null;
+          distance_meters: number | null;
+          is_new: boolean;
+          applied_count: number;
+          accepted_count: number;
+          current_helper_assignment_id: string | null;
+          current_helper_assignment_status:
+            | Database['public']['Enums']['assignment_status']
+            | null;
+          is_full: boolean;
         }[];
       };
       submit_completion: {

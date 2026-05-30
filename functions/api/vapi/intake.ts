@@ -24,9 +24,21 @@ type ExtractedRequest = {
   appointment_time?: unknown;
   appointment_time_local?: unknown;
   appointment_time_utc?: unknown;
+  estimated_duration_minutes?: unknown;
+  duration_minutes?: unknown;
+  estimated_hours?: unknown;
+  duration_hours?: unknown;
   location_public?: unknown;
   location_detail?: unknown;
+  location_latitude?: unknown;
+  location_longitude?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
   credit_reward?: unknown;
+  required_helpers?: unknown;
+  safety_tier?: unknown;
+  needs_safety_review?: unknown;
+  duplicate_suspected?: unknown;
   requester_phone?: unknown;
   requester_name?: unknown;
   confirmed_by_requester?: unknown;
@@ -35,13 +47,15 @@ type ExtractedRequest = {
 
 type RequesterProfile = Pick<
   Database['public']['Tables']['profiles']['Row'],
-  'id' | 'name' | 'phone' | 'address_public'
+  | 'id'
+  | 'name'
+  | 'phone'
+  | 'address_public'
+  | 'address_detail'
+  | 'latitude'
+  | 'longitude'
+  | 'consent_voice'
 >;
-
-type RequesterLookup = {
-  profile: RequesterProfile;
-  created: boolean;
-};
 
 const doumStructuredOutputName = 'doum_help_request';
 
@@ -134,9 +148,11 @@ export async function onRequestPost({ request, env }: PagesContext) {
 
   const extracted = extractStructuredRequest(payload);
   const phone = extractPhone(payload, extracted);
-  let requesterLookup: RequesterLookup;
+  const transcript = extractTranscript(payload);
+  const now = new Date().toISOString();
+  let requester: RequesterProfile | null;
   try {
-    requesterLookup = await findOrCreateRequester(supabase, phone, extracted);
+    requester = await findRegisteredRequester(supabase, phone);
   } catch (error) {
     return jsonResponse(
       {
@@ -144,14 +160,74 @@ export async function onRequestPost({ request, env }: PagesContext) {
         error:
           error instanceof Error
             ? error.message
-            : 'Failed to find or create requester profile.',
+            : 'Failed to find registered requester profile.',
       },
       500,
     );
   }
-  const requester = requesterLookup.profile;
-  const transcript = extractTranscript(payload);
-  const now = new Date().toISOString();
+
+  if (!requester) {
+    const intakeOnly = await recordIntakeWithoutRequest(supabase, {
+      payload,
+      callId,
+      phone,
+      requesterId: null,
+      transcript,
+      extracted,
+      now,
+      status: phone ? 'unregistered_caller' : 'missing_caller_phone',
+      notificationPurpose: 'voice_unregistered_caller',
+      notificationPayload: {
+        requester_phone: phone,
+        reason: phone ? 'unregistered_caller' : 'missing_caller_phone',
+        source: 'voice',
+      },
+    });
+
+    return jsonResponse(
+      {
+        ok: intakeOnly.statusCode < 400,
+        ignored: true,
+        reason: phone ? 'unregistered_caller' : 'missing_caller_phone',
+        voice_call_id: intakeOnly.voiceCallId,
+        notification_created: intakeOnly.notificationCreated,
+        notification_error: intakeOnly.notificationError,
+      },
+      intakeOnly.statusCode,
+    );
+  }
+
+  if (requester.consent_voice !== true) {
+    const intakeOnly = await recordIntakeWithoutRequest(supabase, {
+      payload,
+      callId,
+      phone,
+      requesterId: requester.id,
+      transcript,
+      extracted,
+      now,
+      status: 'voice_consent_missing',
+      notificationPurpose: 'voice_consent_missing',
+      notificationPayload: {
+        requester_name: requester.name,
+        requester_phone: requester.phone,
+        reason: 'voice_consent_missing',
+        source: 'voice',
+      },
+    });
+
+    return jsonResponse(
+      {
+        ok: intakeOnly.statusCode < 400,
+        ignored: true,
+        reason: 'voice_consent_missing',
+        voice_call_id: intakeOnly.voiceCallId,
+        notification_created: intakeOnly.notificationCreated,
+        notification_error: intakeOnly.notificationError,
+      },
+      intakeOnly.statusCode,
+    );
+  }
 
   const { data: voiceCall, error: voiceCallError } = await supabase
     .from('voice_calls')
@@ -195,15 +271,41 @@ export async function onRequestPost({ request, env }: PagesContext) {
 
   const normalizedRequest = normalizeExtractedRequest(extracted);
   if (!normalizedRequest.ok) {
+    const { error: notificationError } = await supabase
+      .from('notifications')
+      .insert({
+        recipient_profile_id: null,
+        help_request_id: null,
+        assignment_id: null,
+        channel: 'in_app',
+        purpose: 'voice_request_needs_manual_entry',
+        status: 'pending',
+        payload: {
+          requester_name: requester.name,
+          requester_phone: requester.phone,
+          voice_call_id: voiceCall.id,
+          reason: normalizedRequest.error,
+          source: 'voice',
+        } satisfies Json,
+      });
+
     return jsonResponse(
       {
-        ok: false,
+        ok: true,
+        needs_manual_entry: true,
         voice_call_id: voiceCall.id,
         error: normalizedRequest.error,
+        notification_created: !notificationError,
+        notification_error: notificationError?.message,
       },
-      422,
+      202,
     );
   }
+
+  const requestLocationLatitude =
+    normalizedRequest.value.location_latitude ?? requester.latitude ?? null;
+  const requestLocationLongitude =
+    normalizedRequest.value.location_longitude ?? requester.longitude ?? null;
 
   const { data: helpRequest, error: helpRequestError } = await supabase
     .from('help_requests')
@@ -222,12 +324,17 @@ export async function onRequestPost({ request, env }: PagesContext) {
         normalizedRequest.value.location_public ??
         requester.address_public ??
         null,
-      location_detail: normalizedRequest.value.location_detail,
+      location_detail:
+        normalizedRequest.value.location_detail ?? requester.address_detail ?? null,
+      location_latitude: requestLocationLatitude,
+      location_longitude: requestLocationLongitude,
       credit_reward: normalizedRequest.value.credit_reward,
+      required_helpers: normalizedRequest.value.required_helpers,
+      safety_tier: normalizedRequest.value.safety_tier,
+      estimated_duration_minutes:
+        normalizedRequest.value.estimated_duration_minutes,
       ai_extracted_payload: (extracted ?? {}) as Json,
-      admin_notes: requesterLookup.created
-        ? 'Created from Vapi intake webhook. Requester profile was created during intake; verify caller details before approving.'
-        : 'Created from Vapi intake webhook.',
+      admin_notes: buildAdminNotes(extracted, normalizedRequest.value),
     })
     .select('id')
     .single();
@@ -279,6 +386,95 @@ export async function onRequestPost({ request, env }: PagesContext) {
     },
     201,
   );
+}
+
+async function recordIntakeWithoutRequest(
+  supabase: ReturnType<typeof createClient<Database>>,
+  {
+    payload,
+    callId,
+    phone,
+    requesterId,
+    transcript,
+    extracted,
+    now,
+    status,
+    notificationPurpose,
+    notificationPayload,
+  }: {
+    payload: unknown;
+    callId: string | null;
+    phone: string | null;
+    requesterId: string | null;
+    transcript: string | null;
+    extracted: ExtractedRequest | null;
+    now: string;
+    status: string;
+    notificationPurpose: string;
+    notificationPayload: Json;
+  },
+) {
+  const { data: voiceCall, error: voiceCallError } = await supabase
+    .from('voice_calls')
+    .insert({
+      provider: 'vapi',
+      provider_call_id: callId,
+      direction: 'inbound',
+      phone: phone ?? 'unknown',
+      requester_id: requesterId,
+      purpose: 'intake',
+      status,
+      transcript,
+      raw_payload: payload as Json,
+      extracted_payload: (extracted ?? null) as Json | null,
+      confidence: toConfidence(extracted?.confidence),
+      confirmed_by_requester:
+        typeof extracted?.confirmed_by_requester === 'boolean'
+          ? extracted.confirmed_by_requester
+          : null,
+      started_at:
+        extractNestedString(payload, ['message', 'startedAt']) ??
+        extractNestedString(payload, ['message', 'call', 'startedAt']) ??
+        null,
+      ended_at:
+        extractNestedString(payload, ['message', 'endedAt']) ??
+        extractNestedString(payload, ['message', 'call', 'endedAt']) ??
+        now,
+    })
+    .select('id')
+    .single();
+
+  if (voiceCallError) {
+    return {
+      statusCode: 500,
+      voiceCallId: null,
+      notificationCreated: false,
+      notificationError: voiceCallError.message,
+    };
+  }
+
+  const notificationRecord = asRecord(notificationPayload) ?? {};
+  const { error: notificationError } = await supabase
+    .from('notifications')
+    .insert({
+      recipient_profile_id: null,
+      help_request_id: null,
+      assignment_id: null,
+      channel: 'in_app',
+      purpose: notificationPurpose,
+      status: 'pending',
+      payload: {
+        ...notificationRecord,
+        voice_call_id: voiceCall.id,
+      } satisfies Json,
+    });
+
+  return {
+    statusCode: 202,
+    voiceCallId: voiceCall.id,
+    notificationCreated: !notificationError,
+    notificationError: notificationError?.message,
+  };
 }
 
 function verifyWebhookSecret(
@@ -402,13 +598,18 @@ function normalizeExtractedRequest(extracted: ExtractedRequest | null):
         content: string;
         items_provided: boolean | null;
         items_needed_details: string | null;
-        appointment_time: string | null;
-        location_public: string | null;
-        location_detail: string | null;
-        credit_reward: number;
-      };
-    }
-  | { ok: false; error: string } {
+	        appointment_time: string | null;
+	        location_public: string | null;
+	        location_detail: string | null;
+	        location_latitude: number | null;
+	        location_longitude: number | null;
+	        credit_reward: number;
+	        required_helpers: number;
+	        safety_tier: Database['public']['Enums']['safety_tier'];
+	        estimated_duration_minutes: number;
+	      };
+	    }
+	  | { ok: false; error: string } {
   if (!extracted) {
     return {
       ok: false,
@@ -427,10 +628,16 @@ function normalizeExtractedRequest(extracted: ExtractedRequest | null):
     };
   }
 
+  const category = mapCategory(toTrimmedString(extracted.category));
+  const estimatedDurationMinutes = toDurationMinutes(extracted);
+  const creditReward =
+    toCreditReward(extracted.credit_reward) ??
+    calculateCreditReward(category, estimatedDurationMinutes);
+
   return {
     ok: true,
     value: {
-      category: mapCategory(toTrimmedString(extracted.category)),
+      category,
       title,
       content,
       items_provided: toNullableBoolean(extracted.items_provided),
@@ -438,55 +645,51 @@ function normalizeExtractedRequest(extracted: ExtractedRequest | null):
       appointment_time: normalizeAppointmentTime(extracted),
       location_public: toTrimmedString(extracted.location_public),
       location_detail: toTrimmedString(extracted.location_detail),
-      credit_reward: toCreditReward(extracted.credit_reward),
+      location_latitude: toNullableNumber(
+        extracted.location_latitude ?? extracted.latitude,
+      ),
+      location_longitude: toNullableNumber(
+        extracted.location_longitude ?? extracted.longitude,
+      ),
+      credit_reward: creditReward,
+      required_helpers: toRequiredHelpers(extracted.required_helpers),
+      safety_tier: mapSafetyTier(
+        extracted.safety_tier,
+        extracted.needs_safety_review,
+      ),
+      estimated_duration_minutes: estimatedDurationMinutes,
     },
   };
 }
 
-async function findOrCreateRequester(
+async function findRegisteredRequester(
   supabase: ReturnType<typeof createClient<Database>>,
   phone: string | null,
-  extracted: ExtractedRequest | null,
-): Promise<RequesterLookup> {
+): Promise<RequesterProfile | null> {
   const normalizedPhone = normalizePhone(phone);
 
   if (normalizedPhone) {
-    const { data: requesters } = await supabase
+    const { data: requesters, error } = await supabase
       .from('profiles')
-      .select('id, name, phone, address_public')
+      .select(
+        'id, name, phone, address_public, address_detail, latitude, longitude, consent_voice',
+      )
       .eq('role', 'requester');
+
+    if (error) {
+      throw new Error(error.message);
+    }
 
     const matched = (requesters ?? []).find(
       (profile) => normalizePhone(profile.phone) === normalizedPhone,
     );
 
     if (matched) {
-      return { profile: matched, created: false };
+      return matched;
     }
   }
 
-  const requesterName =
-    toTrimmedString(extracted?.requester_name) ?? 'Unknown requester';
-  const requesterPhone = phone ?? `unknown-${crypto.randomUUID()}`;
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .insert({
-      role: 'requester',
-      name: requesterName,
-      phone: requesterPhone,
-      village: '다로리',
-      address_public: toTrimmedString(extracted?.location_public),
-      address_detail: toTrimmedString(extracted?.location_detail),
-    })
-    .select('id, name, phone, address_public')
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return { profile: data, created: true };
+  return null;
 }
 
 function extractCallId(payload: unknown) {
@@ -566,6 +769,40 @@ function mapCategory(
   }
 }
 
+function mapSafetyTier(
+  value: unknown,
+  needsSafetyReview: unknown,
+): Database['public']['Enums']['safety_tier'] {
+  if (toNullableBoolean(needsSafetyReview) === true) {
+    return 'needs_review';
+  }
+
+  const normalized = toTrimmedString(value)?.toLowerCase();
+
+  switch (normalized) {
+    case 'tier_1':
+    case 'tier 1':
+    case '1':
+    case '위험':
+      return 'tier_1';
+    case 'tier_2':
+    case 'tier 2':
+    case '2':
+      return 'tier_2';
+    case 'tier_3':
+    case 'tier 3':
+    case '3':
+    case '안전':
+      return 'tier_3';
+    case 'needs_review':
+    case 'review':
+    case '확인필요':
+      return 'needs_review';
+    default:
+      return 'needs_review';
+  }
+}
+
 function toCreditReward(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.max(0, Math.round(value));
@@ -578,7 +815,100 @@ function toCreditReward(value: unknown) {
     }
   }
 
-  return 10;
+  return null;
+}
+
+function toDurationMinutes(extracted: ExtractedRequest) {
+  const directMinutes = toNullableNumber(
+    extracted.estimated_duration_minutes ?? extracted.duration_minutes,
+  );
+  if (directMinutes !== null) {
+    return Math.max(15, Math.round(directMinutes));
+  }
+
+  const hours = toNullableNumber(
+    extracted.estimated_hours ?? extracted.duration_hours,
+  );
+  if (hours !== null) {
+    return Math.max(15, Math.round(hours * 60));
+  }
+
+  return 60;
+}
+
+function calculateCreditReward(
+  category: Database['public']['Enums']['help_category'],
+  durationMinutes: number,
+) {
+  const multiplier =
+    category === 'labor'
+      ? 1.5
+      : category === 'daily_life' || category === 'household'
+        ? 1.2
+        : 1.0;
+
+  return Math.round(15480 * (durationMinutes / 60) * multiplier);
+}
+
+function toRequiredHelpers(value: unknown) {
+  const parsed = toNullableNumber(value);
+  if (parsed === null) {
+    return 3;
+  }
+
+  return Math.min(6, Math.max(3, Math.round(parsed)));
+}
+
+function toNullableNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function buildAdminNotes(
+  extracted: ExtractedRequest | null,
+  normalized: {
+    safety_tier: Database['public']['Enums']['safety_tier'];
+    appointment_time: string | null;
+    location_public: string | null;
+    required_helpers: number;
+  },
+) {
+  const notes = ['Created from Vapi intake webhook.'];
+
+  if (!normalized.appointment_time) {
+    notes.push('Missing appointment time; operator must confirm.');
+  }
+
+  if (!normalized.location_public) {
+    notes.push('Missing public location; operator must confirm.');
+  }
+
+  if (normalized.safety_tier === 'needs_review') {
+    notes.push('Safety tier needs operator review.');
+  }
+
+  if (toNullableBoolean(extracted?.duplicate_suspected) === true) {
+    notes.push('Possible duplicate flagged by intake.');
+  }
+
+  if (normalized.required_helpers === 3) {
+    const rawRequiredHelpers = toNullableNumber(extracted?.required_helpers);
+    if (rawRequiredHelpers !== null && rawRequiredHelpers < 3) {
+      notes.push('Requested helper count below 3 was raised to MVP minimum.');
+    }
+  }
+
+  return notes.join(' ');
 }
 
 function toConfidence(value: unknown) {

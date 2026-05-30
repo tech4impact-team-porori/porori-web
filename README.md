@@ -4,9 +4,10 @@ Minimal functional web app for the DOUM MVP. This repo currently contains:
 
 - Supabase email/password auth
 - role-aware app shell
-- admin/mediator pending request queue
-- admin/mediator approve/reject actions
-- helper feed, acceptance, completion upload, and admin credit confirmation
+- requester whitelist and consent-backed Vapi intake
+- admin/mediator editable request review with publish/reject audit events
+- helper exploration feed with category/NEW/distance filters and application badges
+- helper application, admin matching approval, completion upload, and credit confirmation
 - Cloudflare Pages Function for Vapi intake at `/api/vapi/intake`
 
 ## Local Setup
@@ -50,7 +51,9 @@ https://<your-cloudflare-pages-domain>/api/vapi/intake
 
 Configure a Vapi bearer-token credential with the same value as `VAPI_WEBHOOK_SECRET`.
 
-The endpoint accepts Vapi `end-of-call-report` payloads and looks for structured request data in `message.analysis.structuredData`. It creates:
+The endpoint accepts Vapi `end-of-call-report` payloads and looks for structured request data in `message.analysis.structuredData`. It only creates a help request when the caller matches a registered `requester` profile with `consent_voice = true`; unregistered or non-consenting calls are preserved as `voice_calls` plus admin notifications.
+
+For valid registered callers it creates:
 
 - one `voice_calls` row
 - one `help_requests` row with `status = pending_review`
@@ -77,7 +80,9 @@ Useful local/mock payload:
         "appointment_time_local": "2026-05-30T10:00:00+09:00",
         "location_public": "다로리 동쪽",
         "location_detail": "다로리 12번지",
-        "credit_reward": 20,
+        "required_helpers": 3,
+        "safety_tier": "tier_3",
+        "estimated_duration_minutes": 120,
         "confirmed_by_requester": true,
         "confidence": 0.92
       }
