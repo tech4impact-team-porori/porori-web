@@ -1365,7 +1365,7 @@ function AdminReviewModal({
       return false;
     }
 
-    setMessage('수정 내용을 저장했습니다.');
+    setMessage('수정 내용을 저장했습니다. 게시나 반려 없이 닫아도 됩니다.');
     await onSaved();
     setBusy(false);
     return true;
@@ -1946,11 +1946,16 @@ function Modal({
         aria-modal="true"
         aria-label={title}
       >
+        <button
+          type="button"
+          className="modal-close"
+          onClick={onClose}
+          aria-label="닫기"
+        >
+          X
+        </button>
         <div className="section-header">
           <h2>{title}</h2>
-          <button type="button" className="secondary" onClick={onClose}>
-            닫기
-          </button>
         </div>
         {children}
       </section>

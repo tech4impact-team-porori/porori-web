@@ -614,6 +614,7 @@ button.filter-chip.active {
 }
 
 .modal-panel {
+  position: relative;
   width: min(760px, 100%);
   max-height: min(820px, calc(100vh - 40px));
   overflow: auto;
@@ -622,6 +623,28 @@ button.filter-chip.active {
   background: #ffffff;
   padding: 22px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+}
+
+.modal-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  width: 42px;
+  min-height: 42px;
+  height: 42px;
+  margin: 0 0 4px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.modal-close:hover:not(:disabled) {
+  background: #f7f7f7;
+  border-color: var(--mint);
 }
 
 .modal-panel h2 {
