@@ -430,15 +430,23 @@ p {
 
 .section-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
 }
 
+.section-header > div {
+  min-width: 0;
+}
+
 .section-header h2 {
   margin-bottom: 0;
   font-size: 1.2rem;
+}
+
+.section-header button {
+  flex: 0 0 auto;
 }
 
 .request-list {
@@ -896,13 +904,13 @@ button.filter-chip.active {
   }
 
   .section-header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
   }
 
   .section-header button {
     min-height: 38px;
+    padding-inline: 13px;
   }
 
   .user-block {
