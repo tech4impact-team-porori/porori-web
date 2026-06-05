@@ -19,6 +19,8 @@ type HelpCategory = Database['public']['Enums']['help_category'];
 type SafetyTier = Database['public']['Enums']['safety_tier'];
 type PublishedHelpRequestRow =
   Database['public']['Functions']['list_published_help_requests']['Returns'][number];
+type HelperAssignmentRpcRow =
+  Database['public']['Functions']['list_my_helper_assignments']['Returns'][number];
 
 type RequesterSummary = Pick<
   Profile,
@@ -27,6 +29,9 @@ type RequesterSummary = Pick<
   personal_notes?: string | null;
 };
 type HelperSummary = Pick<Profile, 'id' | 'name' | 'phone'>;
+type CompanionSummary = HelperSummary & {
+  status?: AssignmentRow['status'] | null;
+};
 
 type HelpRequestWithRequester = HelpRequestRow & {
   requester?: RequesterSummary | RequesterSummary[] | null;
@@ -36,6 +41,8 @@ type HelpRequestWithRequester = HelpRequestRow & {
   accepted_count?: number;
   current_helper_assignment_id?: string | null;
   current_helper_assignment_status?: AssignmentRow['status'] | null;
+  application_deadline?: string | null;
+  applications_locked?: boolean;
   is_full?: boolean;
 };
 
@@ -47,8 +54,17 @@ type AssignmentWithRequest = AssignmentRow & {
     | HelpRequestWithRequester[]
     | null;
   helper?: HelperSummary | HelperSummary[] | null;
+  companion_helpers?: CompanionSummary[] | null;
   completion_proofs?: CompletionProofRow[] | null;
   credit_ledger?: CreditLedgerRow[] | null;
+};
+
+type CreditCelebration = {
+  assignmentId: string;
+  title: string;
+  requesterName: string;
+  amount: number;
+  totalCredits: number;
 };
 
 type NotificationPayload = {
@@ -67,6 +83,21 @@ type AuthState = {
   error: string | null;
 };
 
+type RequesterRegistrationForm = {
+  name: string;
+  phone: string;
+  village: string;
+  address_public: string;
+  address_detail: string;
+  latitude: string;
+  longitude: string;
+  personal_notes: string;
+  consent_doc_url: string;
+  consent_info: boolean;
+  consent_voice: boolean;
+  consent_photo: boolean;
+};
+
 const adminRoles = new Set<Profile['role']>(['mediator', 'admin']);
 const helpCategoryOptions: HelpCategory[] = [
   'electronics',
@@ -80,6 +111,20 @@ const safetyTierOptions: SafetyTier[] = [
   'tier_1',
   'needs_review',
 ];
+const emptyRequesterRegistrationForm: RequesterRegistrationForm = {
+  name: '',
+  phone: '',
+  village: '다로리',
+  address_public: '',
+  address_detail: '',
+  latitude: '',
+  longitude: '',
+  personal_notes: '',
+  consent_doc_url: '',
+  consent_info: false,
+  consent_voice: false,
+  consent_photo: false,
+};
 
 export function App() {
   const [auth, setAuth] = useState<AuthState>({
@@ -312,27 +357,294 @@ function AppShell({
 
 function AdminDashboard({ profile }: { profile: Profile }) {
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<
+    'requesters' | 'approval' | 'notifications'
+  >('requesters');
+
+  const tabs = [
+    { id: 'requesters', label: '어르신 등록' },
+    { id: 'approval', label: '승인' },
+    { id: 'notifications', label: '운영 알림' },
+  ] as const;
 
   return (
-    <div className="dashboard-grid">
+    <div className="dashboard-grid admin-dashboard">
       <section className="hero-panel admin-hero">
         <p className="eyebrow">오늘의 운영</p>
         <h1>포로리가 접수한 요청을 확인하세요</h1>
         <p>공고 초안을 검토하고, 완료 인증을 승인해 크레딧을 지급합니다.</p>
       </section>
-      <AdminPendingRequests
-        onReviewed={() => setActivityRefreshKey((current) => current + 1)}
-      />
-      <AdminApplicationQueue
-        onReviewed={() => setActivityRefreshKey((current) => current + 1)}
-      />
-      <AdminCompletionQueue />
-      <ActivityPanel
-        audience="admin"
-        profile={profile}
-        refreshKey={activityRefreshKey}
-      />
+
+      <div className="admin-tab-list" role="tablist" aria-label="운영 작업">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={activeTab === tab.id ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="admin-tab-panels">
+        {activeTab === 'requesters' ? (
+          <AdminRequesterRegistrationPanel
+            onRegistered={() => setActivityRefreshKey((current) => current + 1)}
+          />
+        ) : null}
+
+        {activeTab === 'approval' ? (
+          <div className="admin-approval-stack">
+            <AdminPendingRequests
+              onReviewed={() => setActivityRefreshKey((current) => current + 1)}
+            />
+            <AdminApplicationQueue
+              onReviewed={() => setActivityRefreshKey((current) => current + 1)}
+            />
+            <AdminCompletionQueue />
+          </div>
+        ) : null}
+
+        {activeTab === 'notifications' ? (
+          <ActivityPanel
+            audience="admin"
+            profile={profile}
+            refreshKey={activityRefreshKey}
+          />
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function AdminRequesterRegistrationPanel({
+  onRegistered,
+}: {
+  onRegistered: () => void;
+}) {
+  const [form, setForm] = useState<RequesterRegistrationForm>(
+    emptyRequesterRegistrationForm,
+  );
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  function updateField<K extends keyof RequesterRegistrationForm>(
+    key: K,
+    value: RequesterRegistrationForm[K],
+  ) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFeedback(null);
+
+    if (!form.consent_info || !form.consent_voice || !form.consent_photo) {
+      setFeedback({
+        type: 'error',
+        text: '필수 동의 3가지를 모두 확인해야 등록할 수 있습니다.',
+      });
+      return;
+    }
+
+    setBusy(true);
+
+    const { data, error } = await supabase.rpc('register_requester_profile', {
+      p_name: form.name.trim(),
+      p_phone: form.phone.trim(),
+      p_village: nullableText(form.village),
+      p_address_public: nullableText(form.address_public),
+      p_address_detail: nullableText(form.address_detail),
+      p_latitude: nullableNumber(form.latitude),
+      p_longitude: nullableNumber(form.longitude),
+      p_personal_notes: nullableText(form.personal_notes),
+      p_consent_info: form.consent_info,
+      p_consent_voice: form.consent_voice,
+      p_consent_photo: form.consent_photo,
+      p_consent_doc_url: nullableText(form.consent_doc_url),
+    });
+
+    if (error) {
+      setFeedback({
+        type: 'error',
+        text: requesterRegistrationErrorMessage(error.message),
+      });
+    } else {
+      setFeedback({
+        type: 'success',
+        text: `어르신 등록을 완료했습니다. 등록 ID: ${data}`,
+      });
+      setForm(emptyRequesterRegistrationForm);
+      onRegistered();
+    }
+
+    setBusy(false);
+  }
+
+  return (
+    <section className="panel requester-registration-panel">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">어르신 등록</p>
+          <h2>대면 수기 등록</h2>
+        </div>
+      </div>
+
+      <form className="requester-registration-form" onSubmit={handleSubmit}>
+        <div className="form-grid">
+          <label>
+            <span>
+              성함 <span className="required-marker">*</span>
+            </span>
+            <input
+              value={form.name}
+              onChange={(event) => updateField('name', event.target.value)}
+              placeholder="김말숙"
+              required
+            />
+          </label>
+          <label>
+            <span>
+              전화번호 <span className="required-marker">*</span>
+            </span>
+            <input
+              value={form.phone}
+              onChange={(event) => updateField('phone', event.target.value)}
+              placeholder="010-0000-0000"
+              required
+            />
+          </label>
+          <label>
+            마을
+            <input
+              value={form.village}
+              onChange={(event) => updateField('village', event.target.value)}
+              placeholder="다로리"
+            />
+          </label>
+          <label>
+            공개 주소
+            <input
+              value={form.address_public}
+              onChange={(event) =>
+                updateField('address_public', event.target.value)
+              }
+              placeholder="다로리 30길"
+            />
+          </label>
+          <label className="form-wide">
+            상세 주소
+            <input
+              value={form.address_detail}
+              onChange={(event) =>
+                updateField('address_detail', event.target.value)
+              }
+              placeholder="다로리 30길 12번지"
+            />
+          </label>
+          <label>
+            위도
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              value={form.latitude}
+              onChange={(event) => updateField('latitude', event.target.value)}
+              placeholder="36.413"
+            />
+          </label>
+          <label>
+            경도
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              value={form.longitude}
+              onChange={(event) => updateField('longitude', event.target.value)}
+              placeholder="127.385"
+            />
+          </label>
+          <label className="form-wide">
+            개인 특이사항
+            <textarea
+              value={form.personal_notes}
+              onChange={(event) =>
+                updateField('personal_notes', event.target.value)
+              }
+              placeholder="청각 어려움, 거동 불편 등 공고에 노출하면 안 되는 운영 메모"
+              rows={3}
+            />
+          </label>
+          <label className="form-wide">
+            수기 동의서 스캔 경로
+            <input
+              value={form.consent_doc_url}
+              onChange={(event) =>
+                updateField('consent_doc_url', event.target.value)
+              }
+              placeholder="consent-documents/..."
+            />
+          </label>
+        </div>
+
+        <fieldset className="consent-fieldset">
+          <legend>필수 동의 확인</legend>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={form.consent_info}
+              onChange={(event) =>
+                updateField('consent_info', event.target.checked)
+              }
+            />
+            개인정보 수집·이용 동의
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={form.consent_voice}
+              onChange={(event) =>
+                updateField('consent_voice', event.target.checked)
+              }
+            />
+            통화 내용 녹음 동의
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={form.consent_photo}
+              onChange={(event) =>
+                updateField('consent_photo', event.target.checked)
+              }
+            />
+            완료 인증 사진 촬영·보관 동의
+          </label>
+        </fieldset>
+
+        {feedback ? (
+          <p
+            className={
+              feedback.type === 'error' ? 'error-message' : 'form-message'
+            }
+          >
+            {feedback.text}
+          </p>
+        ) : null}
+
+        <div className="button-row">
+          <button type="submit" disabled={busy}>
+            {busy ? '등록 중...' : '어르신 등록'}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -477,7 +789,7 @@ function AdminApplicationQueue({ onReviewed }: { onReviewed: () => void }) {
         )
       `,
       )
-      .eq('status', 'applied')
+      .in('status', ['applied', 'accepted'])
       .order('applied_at', { ascending: true });
 
     if (assignmentError) {
@@ -493,6 +805,24 @@ function AdminApplicationQueue({ onReviewed }: { onReviewed: () => void }) {
   useEffect(() => {
     void loadApplications();
   }, [loadApplications]);
+
+  const groupedAssignments = useMemo(() => {
+    const groups = new Map<string, AssignmentWithRequest[]>();
+
+    for (const assignment of assignments) {
+      const request = normalizeOne(assignment.help_request);
+      const requestId = request?.id ?? assignment.help_request_id;
+      groups.set(requestId, [...(groups.get(requestId) ?? []), assignment]);
+    }
+
+    return Array.from(groups.entries()).map(([requestId, groupAssignments]) => ({
+      requestId,
+      request: normalizeOne(groupAssignments[0]?.help_request),
+      assignments: groupAssignments,
+      appliedCount: groupAssignments.filter((assignment) => assignment.status === 'applied').length,
+      acceptedCount: groupAssignments.filter((assignment) => assignment.status === 'accepted').length,
+    }));
+  }, [assignments]);
 
   async function reviewApplication(
     assignmentId: string,
@@ -523,6 +853,94 @@ function AdminApplicationQueue({ onReviewed }: { onReviewed: () => void }) {
     setWorkingId(null);
   }
 
+  async function approveAllForRequest(requestId: string) {
+    setWorkingId(requestId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc(
+      'approve_all_assignments_for_request',
+      {
+        p_help_request_id: requestId,
+      },
+    );
+
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
+      setAssignments((current) =>
+        current.filter((assignment) => assignment.help_request_id !== requestId),
+      );
+      onReviewed();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function finalizeMatch(requestId: string, acceptedCount: number) {
+    const reason =
+      acceptedCount < 3
+        ? window.prompt('부족 인원으로 진행하는 사유를 입력하세요.')
+        : null;
+
+    if (acceptedCount < 3 && !reason?.trim()) {
+      setError('부족 인원으로 확정하려면 사유가 필요합니다.');
+      return;
+    }
+
+    setWorkingId(requestId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc(
+      'finalize_help_request_match',
+      {
+        p_help_request_id: requestId,
+        p_underfilled_reason: reason,
+      },
+    );
+
+    if (rpcError) {
+      setError(adminMatchingErrorMessage(rpcError.message));
+    } else {
+      setAssignments((current) =>
+        current.filter((assignment) => assignment.help_request_id !== requestId),
+      );
+      onReviewed();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function markUnfilled(requestId: string) {
+    const reason = window.prompt('무산 사유를 입력하세요.');
+
+    if (!reason?.trim()) {
+      setError('무산 처리하려면 사유가 필요합니다.');
+      return;
+    }
+
+    setWorkingId(requestId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc(
+      'mark_help_request_unfilled',
+      {
+        p_help_request_id: requestId,
+        p_reason: reason,
+      },
+    );
+
+    if (rpcError) {
+      setError(adminMatchingErrorMessage(rpcError.message));
+    } else {
+      setAssignments((current) =>
+        current.filter((assignment) => assignment.help_request_id !== requestId),
+      );
+      onReviewed();
+    }
+
+    setWorkingId(null);
+  }
+
   return (
     <section className="panel">
       <div className="section-header">
@@ -542,14 +960,55 @@ function AdminApplicationQueue({ onReviewed }: { onReviewed: () => void }) {
       ) : null}
 
       <div className="request-list">
-        {assignments.map((assignment) => (
-          <ApplicationReviewCard
-            key={assignment.id}
-            assignment={assignment}
-            busy={workingId === assignment.id}
-            onApprove={() => void reviewApplication(assignment.id, 'approve')}
-            onReject={() => void reviewApplication(assignment.id, 'reject')}
-          />
+        {groupedAssignments.map((group) => (
+          <section className="application-group" key={group.requestId}>
+            <div className="application-group-header">
+              <div>
+                <p className="eyebrow">도움 요청</p>
+                <h3>{group.request?.title ?? '제목 없는 요청'}</h3>
+                <p className="muted">
+                  신청 {group.appliedCount}명 · 확정 {group.acceptedCount}명 · 필요{' '}
+                  {group.request?.required_helpers ?? 3}명
+                </p>
+              </div>
+              <div className="button-row compact-actions">
+                <button
+                  type="button"
+                  onClick={() => void approveAllForRequest(group.requestId)}
+                  disabled={workingId === group.requestId || group.appliedCount === 0}
+                >
+                  대기자 모두 승인
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void finalizeMatch(group.requestId, group.acceptedCount)}
+                  disabled={workingId === group.requestId || group.acceptedCount < 2}
+                >
+                  매칭 확정
+                </button>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={() => void markUnfilled(group.requestId)}
+                  disabled={workingId === group.requestId}
+                >
+                  무산
+                </button>
+              </div>
+            </div>
+            <div className="request-list compact-list">
+              {group.assignments.map((assignment) => (
+                <ApplicationReviewCard
+                  key={assignment.id}
+                  assignment={assignment}
+                  busy={workingId === assignment.id}
+                  onApprove={() => void reviewApplication(assignment.id, 'approve')}
+                  onReject={() => void reviewApplication(assignment.id, 'reject')}
+                />
+              ))}
+            </div>
+          </section>
         ))}
       </div>
     </section>
@@ -619,7 +1078,7 @@ function AdminCompletionQueue() {
       {
         p_assignment_id: assignmentId,
         p_rating: 5,
-        p_review_text: 'Admin confirmed completion for MVP test.',
+        p_review_text: '관리자가 완료 사진과 활동 후기를 확인했습니다.',
         p_source: 'admin_manual',
       },
     );
@@ -677,7 +1136,13 @@ function AdminCompletionQueue() {
 
 function HelperDashboard({ profile }: { profile: Profile }) {
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  const [creditCelebration, setCreditCelebration] =
+    useState<CreditCelebration | null>(null);
   const displayName = shortDisplayName(profile.name);
+  const handleCreditEarned = useCallback((celebration: CreditCelebration) => {
+    setCreditCelebration(celebration);
+    setActivityRefreshKey((current) => current + 1);
+  }, []);
 
   return (
     <div className="dashboard-grid helper-dashboard">
@@ -696,12 +1161,21 @@ function HelperDashboard({ profile }: { profile: Profile }) {
         profile={profile}
         onAccepted={() => setActivityRefreshKey((current) => current + 1)}
       />
-      <HelperAssignments profile={profile} />
+      <HelperAssignments
+        profile={profile}
+        onCreditEarned={handleCreditEarned}
+      />
       <ActivityPanel
         audience="helper"
         profile={profile}
         refreshKey={activityRefreshKey}
       />
+      {creditCelebration ? (
+        <CreditEarnedModal
+          celebration={creditCelebration}
+          onClose={() => setCreditCelebration(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -837,6 +1311,18 @@ function HelperFeed({
     setWorkingId(null);
   }
 
+  async function acceptSelectedRequest(request: HelpRequestWithRequester) {
+    await acceptRequest(request.id);
+    setSelectedRequest((current) =>
+      current?.id === request.id
+        ? {
+            ...current,
+            current_helper_assignment_status: 'applied',
+          }
+        : current,
+    );
+  }
+
   const newCount = requests.filter((request) => request.is_new).length;
   const nudge =
     requests.length === 0
@@ -899,7 +1385,7 @@ function HelperFeed({
             type="button"
             className={newOnly ? 'filter-chip active' : 'filter-chip'}
             onClick={() => setNewOnly((current) => !current)}
-            title="게시 후 24시간 이내 요청"
+            title="게시 후 48시간 이내 요청"
           >
             NEW
           </button>
@@ -938,26 +1424,29 @@ function HelperFeed({
                 >
                   상세
                 </button>
-	                <button
-	                  type="button"
-	                  onClick={() => void acceptRequest(request.id)}
-	                  disabled={
-	                    workingId === request.id ||
-	                    Boolean(request.current_helper_assignment_status) ||
-	                    request.is_full === true
-	                  }
-	                >
-	                  {request.current_helper_assignment_status
-	                    ? '신청 완료'
-	                    : request.is_full
-	                      ? '마감'
-	                      : '도움 신청'}
-	                </button>
-	              </>
-	            }
-	          />
-	        ))}
-	      </div>
+                <button
+                  type="button"
+                  onClick={() => void acceptRequest(request.id)}
+                  disabled={
+                    workingId === request.id ||
+                    Boolean(request.current_helper_assignment_status) ||
+                    request.is_full === true ||
+                    request.applications_locked === true
+                  }
+                >
+                  {request.current_helper_assignment_status
+                    ? '신청함'
+                    : request.is_full
+                      ? '마감'
+                      : request.applications_locked
+                        ? '신청 마감'
+                        : '도움 신청'}
+                </button>
+              </>
+            }
+          />
+        ))}
+      </div>
 
       {hasMore ? (
         <div className="button-row load-more-row">
@@ -976,6 +1465,8 @@ function HelperFeed({
         <RequestDetailModal
           audience="helper"
           request={selectedRequest}
+          working={workingId === selectedRequest.id}
+          onApply={() => void acceptSelectedRequest(selectedRequest)}
           onClose={() => setSelectedRequest(null)}
         />
       ) : null}
@@ -983,50 +1474,85 @@ function HelperFeed({
   );
 }
 
-function HelperAssignments({ profile }: { profile: Profile }) {
+function HelperAssignments({
+  profile,
+  onCreditEarned,
+}: {
+  profile: Profile;
+  onCreditEarned: (celebration: CreditCelebration) => void;
+}) {
   const [assignments, setAssignments] = useState<AssignmentWithRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [files, setFiles] = useState<Record<string, File | null>>({});
+  const [selectedAssignment, setSelectedAssignment] =
+    useState<AssignmentWithRequest | null>(null);
 
   const loadAssignments = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    const { data, error: assignmentError } = await supabase
-      .from('assignments')
-      .select(
-        `
-        *,
-        help_request:help_requests!assignments_help_request_id_fkey (
-          *,
-          requester:profiles!help_requests_requester_id_fkey (
-            id,
-            name,
-            phone,
-            village,
-            address_public,
-            address_detail
-          )
-        ),
-        completion_proofs (*),
-        credit_ledger (*)
-      `,
-      )
-      .eq('helper_id', profile.id)
-      .order('accepted_at', { ascending: false });
+    const { data, error: assignmentError } = await supabase.rpc(
+      'list_my_helper_assignments',
+    );
 
     if (assignmentError) {
       setError(assignmentError.message);
       setAssignments([]);
     } else {
-      setAssignments((data ?? []) as AssignmentWithRequest[]);
+      const nextAssignments = ((data ?? []) as HelperAssignmentRpcRow[]).map(
+        mapHelperAssignment,
+      );
+      setAssignments(nextAssignments);
+
+      const creditedAssignment = nextAssignments.find((assignment) => {
+        const creditedAmount = assignmentCreditAmount(assignment);
+        if (creditedAmount <= 0 || assignment.status !== 'confirmed') {
+          return false;
+        }
+
+        const celebrationKey = creditCelebrationStorageKey(
+          profile.id,
+          assignment.id,
+          creditedAmount,
+        );
+        return localStorage.getItem(celebrationKey) !== 'shown';
+      });
+
+      if (creditedAssignment) {
+        const creditedAmount = assignmentCreditAmount(creditedAssignment);
+        const { data: creditRows } = await supabase
+          .from('credit_ledger')
+          .select('amount')
+          .eq('profile_id', profile.id);
+        const totalCredits =
+          creditRows?.reduce((sum, credit) => sum + credit.amount, 0) ??
+          creditedAmount;
+        const request = normalizeOne(creditedAssignment.help_request);
+        const requester = normalizeOne(request?.requester);
+
+        localStorage.setItem(
+          creditCelebrationStorageKey(
+            profile.id,
+            creditedAssignment.id,
+            creditedAmount,
+          ),
+          'shown',
+        );
+        onCreditEarned({
+          assignmentId: creditedAssignment.id,
+          title: request?.title ?? '도움 활동',
+          requesterName: requester?.name ?? '어르신',
+          amount: creditedAmount,
+          totalCredits,
+        });
+      }
     }
 
     setLoading(false);
-  }, [profile.id]);
+  }, [onCreditEarned, profile.id]);
 
   useEffect(() => {
     void loadAssignments();
@@ -1036,6 +1562,12 @@ function HelperAssignments({ profile }: { profile: Profile }) {
     const file = files[assignment.id];
     if (!file) {
       setError('완료 사진을 선택한 뒤 제출하세요.');
+      return;
+    }
+
+    const note = notes[assignment.id]?.trim() ?? '';
+    if (!note) {
+      setError('활동 후기를 입력한 뒤 제출하세요.');
       return;
     }
 
@@ -1060,7 +1592,7 @@ function HelperAssignments({ profile }: { profile: Profile }) {
     const { error: rpcError } = await supabase.rpc('submit_completion', {
       p_assignment_id: assignment.id,
       p_image_path: imagePath,
-      p_note: notes[assignment.id] || null,
+      p_note: note,
     });
 
     if (rpcError) {
@@ -1068,6 +1600,23 @@ function HelperAssignments({ profile }: { profile: Profile }) {
     } else {
       setFiles((current) => ({ ...current, [assignment.id]: null }));
       setNotes((current) => ({ ...current, [assignment.id]: '' }));
+      await loadAssignments();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function cancelApplication(assignmentId: string) {
+    setWorkingId(assignmentId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc('cancel_help_application', {
+      p_assignment_id: assignmentId,
+    });
+
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
       await loadAssignments();
     }
 
@@ -1097,19 +1646,35 @@ function HelperAssignments({ profile }: { profile: Profile }) {
           <HelperAssignmentCard
             key={assignment.id}
             assignment={assignment}
-            file={files[assignment.id] ?? null}
-            note={notes[assignment.id] ?? ''}
             busy={workingId === assignment.id}
-            onFileChange={(file) =>
-              setFiles((current) => ({ ...current, [assignment.id]: file }))
-            }
-            onNoteChange={(note) =>
-              setNotes((current) => ({ ...current, [assignment.id]: note }))
-            }
-            onSubmit={() => void submitCompletion(assignment)}
+            onCancel={() => void cancelApplication(assignment.id)}
+            onViewDetails={() => setSelectedAssignment(assignment)}
           />
         ))}
       </div>
+
+      {selectedAssignment ? (
+        <AcceptedHelpDetailModal
+          assignment={selectedAssignment}
+          file={files[selectedAssignment.id] ?? null}
+          note={notes[selectedAssignment.id] ?? ''}
+          busy={workingId === selectedAssignment.id}
+          onFileChange={(file) =>
+            setFiles((current) => ({
+              ...current,
+              [selectedAssignment.id]: file,
+            }))
+          }
+          onNoteChange={(note) =>
+            setNotes((current) => ({
+              ...current,
+              [selectedAssignment.id]: note,
+            }))
+          }
+          onSubmit={() => void submitCompletion(selectedAssignment)}
+          onClose={() => setSelectedAssignment(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1313,8 +1878,10 @@ function AdminReviewModal({
   const [voiceCalls, setVoiceCalls] = useState<VoiceCallRow[]>([]);
   const [loadingVoice, setLoadingVoice] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -1372,8 +1939,7 @@ function AdminReviewModal({
 
   async function saveEdits() {
     setBusy(true);
-    setError(null);
-    setMessage(null);
+    setFeedback(null);
 
     const { error: rpcError } = await supabase.rpc('admin_update_help_request', {
       p_help_request_id: request.id,
@@ -1381,12 +1947,18 @@ function AdminReviewModal({
     });
 
     if (rpcError) {
-      setError(rpcError.message);
+      setFeedback({
+        tone: 'error',
+        text: adminReviewErrorMessage(rpcError.message),
+      });
       setBusy(false);
       return false;
     }
 
-    setMessage('수정 내용을 저장했습니다. 게시나 반려 없이 닫아도 됩니다.');
+    setFeedback({
+      tone: 'success',
+      text: '수정 내용을 저장했습니다. 게시나 반려 없이 닫아도 됩니다.',
+    });
     await onSaved();
     setBusy(false);
     return true;
@@ -1399,7 +1971,7 @@ function AdminReviewModal({
     }
 
     setBusy(true);
-    setError(null);
+    setFeedback(null);
 
     const { error: rpcError } = await supabase.rpc('review_help_request', {
       p_help_request_id: request.id,
@@ -1409,7 +1981,10 @@ function AdminReviewModal({
     });
 
     if (rpcError) {
-      setError(rpcError.message);
+      setFeedback({
+        tone: 'error',
+        text: adminReviewErrorMessage(rpcError.message),
+      });
     } else {
       onReviewed(request.id);
     }
@@ -1620,8 +2195,11 @@ function AdminReviewModal({
           ) : null}
         </section>
 
-        {message ? <p className="form-message">{message}</p> : null}
-        {error ? <p className="error-message">{error}</p> : null}
+        {feedback ? (
+          <p className={feedback.tone === 'success' ? 'form-message' : 'error-message'}>
+            {feedback.text}
+          </p>
+        ) : null}
         <div className="button-row">
           <button type="button" className="secondary" onClick={() => void saveEdits()} disabled={busy}>
             저장
@@ -1646,16 +2224,21 @@ function AdminReviewModal({
 function RequestDetailModal({
   audience,
   request,
+  working = false,
+  onApply,
   onClose,
 }: {
   audience: 'admin' | 'helper';
   request: HelpRequestWithRequester;
+  working?: boolean;
+  onApply?: () => void;
   onClose: () => void;
 }) {
   const requester = normalizeOne(request.requester);
   const [voiceCalls, setVoiceCalls] = useState<VoiceCallRow[]>([]);
   const [loadingVoice, setLoadingVoice] = useState(audience === 'admin');
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const helperCta = helperRequestCta(request);
 
   useEffect(() => {
     let mounted = true;
@@ -1768,9 +2351,33 @@ function RequestDetailModal({
         </dl>
 
         {audience === 'helper' ? (
-          <p className="hint">
-            상세 주소와 연락처는 도움 신청 후 표시됩니다.
-          </p>
+          <>
+            <div className="locked-info-box">
+              <strong>상세 주소·연락처는 매칭 확정 후 안내돼요</strong>
+              <p>
+                지금은 어르신 성함과 대략 위치만 확인할 수 있습니다.
+              </p>
+            </div>
+
+            <div className="detail-cta-bar">
+              <div>
+                <p className="eyebrow">신청 상태</p>
+                <strong>{helperCta.message}</strong>
+                {request.application_deadline ? (
+                  <p className="muted">
+                    신청 마감: {formatDateTime(request.application_deadline)}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={onApply}
+                disabled={!helperCta.canApply || working}
+              >
+                {working ? '처리 중...' : helperCta.label}
+              </button>
+            </div>
+          </>
         ) : null}
 
         {audience === 'admin' ? (
@@ -1845,6 +2452,7 @@ function CompletionDetailModal({
   const request = normalizeOne(assignment.help_request);
   const requester = normalizeOne(request?.requester);
   const helper = normalizeOne(assignment.helper);
+  const isPending = assignment.status === 'applied';
   const proof = assignment.completion_proofs?.[0] ?? null;
 
   return (
@@ -1901,6 +2509,218 @@ function CompletionDetailModal({
         ) : (
           <p className="muted">이 활동에 등록된 완료 사진이 없습니다.</p>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+function AcceptedHelpDetailModal({
+  assignment,
+  file,
+  note,
+  busy,
+  onFileChange,
+  onNoteChange,
+  onSubmit,
+  onClose,
+}: {
+  assignment: AssignmentWithRequest;
+  file: File | null;
+  note: string;
+  busy: boolean;
+  onFileChange: (file: File | null) => void;
+  onNoteChange: (note: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  const request = normalizeOne(assignment.help_request);
+  const requester = normalizeOne(request?.requester);
+  const proof = assignment.completion_proofs?.[0] ?? null;
+  const creditedAmount = assignmentCreditAmount(assignment);
+  const hasStarted = hasVisitStarted(request?.appointment_time ?? null);
+  const canSubmitCompletion =
+    assignment.status === 'accepted' &&
+    hasStarted &&
+    Boolean(file) &&
+    note.trim().length > 0;
+  const companions = assignment.companion_helpers ?? [];
+  const requesterPhone = requester?.phone?.trim() ?? '';
+
+  return (
+    <Modal title="방문 준비" onClose={onClose}>
+      <div className="detail-stack accepted-detail">
+        <div className="visit-hero">
+          <span className="status-badge">{assignmentStatusLabel(assignment.status)}</span>
+          <h3>{request?.title ?? '도움 활동'}</h3>
+          <p>
+            {requester?.name ?? '어르신'}께 방문하기 전에 시간, 장소, 연락 수단을
+            확인하세요.
+          </p>
+        </div>
+
+        <dl className="meta-grid">
+          <div>
+            <dt>방문 시간</dt>
+            <dd>{formatDateTime(request?.appointment_time ?? null)}</dd>
+          </div>
+          <div>
+            <dt>정확한 방문 주소</dt>
+            <dd>
+              {request?.location_detail ??
+                requester?.address_detail ??
+                request?.location_public ??
+                '-'}
+            </dd>
+          </div>
+          <div>
+            <dt>어르신 연락처</dt>
+            <dd>{requesterPhone || '-'}</dd>
+          </div>
+          <div>
+            <dt>예상 크레딧</dt>
+            <dd>{formatCredits(request?.credit_reward ?? 0)}</dd>
+          </div>
+          <div>
+            <dt>확정 인원</dt>
+            <dd>
+              {request?.accepted_count ?? companions.length}/
+              {request?.required_helpers ?? 3}명
+            </dd>
+          </div>
+          <div>
+            <dt>작업 참고</dt>
+            <dd>{request?.items_needed_details ?? '추가 참고사항 없음'}</dd>
+          </div>
+        </dl>
+
+        <section className="map-preview">
+          <img src={mapImage} alt="다로리 지도" />
+          <span className="map-pin" aria-hidden="true">●</span>
+        </section>
+
+        <section className="detail-section">
+          <h4>동행 청년</h4>
+          {companions.length > 0 ? (
+            <div className="companion-chip-row">
+              {companions.map((companion) => (
+                <span className="companion-chip" key={companion.id}>
+                  {companion.name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">확정된 동행 청년 정보가 아직 없습니다.</p>
+          )}
+        </section>
+
+        <section className="detail-section guidance-box">
+          <h4>방문 안내</h4>
+          <ul>
+            {personalGuidanceItems(requester?.personal_notes).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+
+        <div className="button-row">
+          {requesterPhone ? (
+            <a className="button-link secondary" href={`tel:${requesterPhone}`}>
+              전화하기
+            </a>
+          ) : (
+            <button type="button" className="secondary" disabled>
+              연락처 없음
+            </button>
+          )}
+        </div>
+
+        {creditedAmount > 0 ? (
+          <section className="detail-section">
+            <h4>크레딧 적립</h4>
+            <p>{formatCredits(creditedAmount)} 적립이 완료되었습니다.</p>
+          </section>
+        ) : null}
+
+        {proof ? (
+          <section className="detail-section">
+            <h4>완료 인증</h4>
+            <p>활동 후기와 인증 사진이 제출되었습니다.</p>
+          </section>
+        ) : null}
+
+        {assignment.status === 'accepted' ? (
+          <div className="completion-form">
+            {!hasStarted ? (
+              <p className="form-message">
+                방문 시간이 된 뒤 완료 인증을 제출할 수 있습니다.
+              </p>
+            ) : null}
+            <label>
+              완료 사진
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) =>
+                  onFileChange(event.target.files?.item(0) ?? null)
+                }
+              />
+            </label>
+            <label>
+              활동 후기
+              <input
+                type="text"
+                value={note}
+                onChange={(event) => onNoteChange(event.target.value)}
+                placeholder="어르신과의 활동 후기를 남겨주세요"
+              />
+            </label>
+            <div className="button-row">
+              <button
+                type="button"
+                onClick={onSubmit}
+                disabled={busy || !canSubmitCompletion}
+              >
+                완료 인증하기
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
+function CreditEarnedModal({
+  celebration,
+  onClose,
+}: {
+  celebration: CreditCelebration;
+  onClose: () => void;
+}) {
+  return (
+    <Modal title="크레딧 적립 완료" onClose={onClose}>
+      <div className="credit-success">
+        <span className="status-badge">적립 완료</span>
+        <h3>크레딧이 적립되었어요!</h3>
+        <p>
+          {celebration.requesterName} 어르신의 {celebration.title} 활동을
+          도와주셔서 감사합니다.
+        </p>
+        <dl className="meta-grid">
+          <div>
+            <dt>이번 적립</dt>
+            <dd>{formatCredits(celebration.amount)}</dd>
+          </div>
+          <div>
+            <dt>내 총 크레딧</dt>
+            <dd>{formatCredits(celebration.totalCredits)}</dd>
+          </div>
+        </dl>
+        <div className="button-row">
+          <button type="button" onClick={onClose}>
+            메인으로 돌아가기
+          </button>
+        </div>
       </div>
     </Modal>
   );
@@ -2111,27 +2931,21 @@ function RequestCard({
 
 function HelperAssignmentCard({
   assignment,
-  file,
-  note,
   busy,
-  onFileChange,
-  onNoteChange,
-  onSubmit,
+  onCancel,
+  onViewDetails,
 }: {
   assignment: AssignmentWithRequest;
-  file: File | null;
-  note: string;
   busy: boolean;
-  onFileChange: (file: File | null) => void;
-  onNoteChange: (note: string) => void;
-  onSubmit: () => void;
+  onCancel: () => void;
+  onViewDetails: () => void;
 }) {
   const request = normalizeOne(assignment.help_request);
   const requester = normalizeOne(request?.requester);
   const proof = assignment.completion_proofs?.[0] ?? null;
-  const creditedAmount =
-    assignment.credit_ledger?.reduce((sum, credit) => sum + credit.amount, 0) ?? 0;
+  const creditedAmount = assignmentCreditAmount(assignment);
   const canViewPrivateLocation = assignment.status !== 'applied';
+  const canOpenDetails = assignment.status !== 'applied';
 
   return (
     <article className="request-card">
@@ -2173,32 +2987,19 @@ function HelperAssignmentCard({
         ) : null}
       </dl>
 
-      {assignment.status === 'accepted' ? (
-        <div className="completion-form">
-          <label>
-            완료 사진
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(event) =>
-                onFileChange(event.target.files?.item(0) ?? null)
-              }
-            />
-          </label>
-          <label>
-            활동 후기
-            <input
-              type="text"
-              value={note}
-              onChange={(event) => onNoteChange(event.target.value)}
-              placeholder="어르신과의 활동 후기를 남겨주세요"
-            />
-          </label>
-          <div className="button-row">
-            <button type="button" onClick={onSubmit} disabled={busy || !file}>
-              완료 인증하기
-            </button>
-          </div>
+      {assignment.status === 'applied' ? (
+        <div className="button-row">
+          <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
+            신청 취소
+          </button>
+        </div>
+      ) : null}
+
+      {canOpenDetails ? (
+        <div className="button-row">
+          <button type="button" onClick={onViewDetails}>
+            {assignment.status === 'accepted' ? '방문 준비' : '활동 상세'}
+          </button>
         </div>
       ) : null}
     </article>
@@ -2219,13 +3020,18 @@ function ApplicationReviewCard({
   const request = normalizeOne(assignment.help_request);
   const requester = normalizeOne(request?.requester);
   const helper = normalizeOne(assignment.helper);
+  const isPending = assignment.status === 'applied';
 
   return (
     <article className="request-card">
       <div>
         <span className="status-badge">{assignmentStatusLabel(assignment.status)}</span>
         <h3>{request?.title ?? '제목 없는 요청'}</h3>
-        <p>{helper?.name ?? '청년 도움자'}님의 도움 신청을 검토합니다.</p>
+        <p>
+          {isPending
+            ? `${helper?.name ?? '청년 도움자'}님의 도움 신청을 검토합니다.`
+            : `${helper?.name ?? '청년 도움자'}님은 이미 매칭 승인됐습니다.`}
+        </p>
       </div>
       <dl className="meta-grid">
         <div>
@@ -2261,14 +3067,16 @@ function ApplicationReviewCard({
           <dd>{requester?.personal_notes ?? '비공개 메모 없음'}</dd>
         </div>
       </dl>
-      <div className="button-row">
-        <button type="button" className="secondary" onClick={onReject} disabled={busy}>
-          반려
-        </button>
-        <button type="button" onClick={onApprove} disabled={busy}>
-          매칭 승인
-        </button>
-      </div>
+      {isPending ? (
+        <div className="button-row">
+          <button type="button" className="secondary" onClick={onReject} disabled={busy}>
+            반려
+          </button>
+          <button type="button" onClick={onApprove} disabled={busy}>
+            매칭 승인
+          </button>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -2420,6 +3228,95 @@ function assignmentStatusLabel(status: AssignmentRow['status']) {
   return labels[status];
 }
 
+function helperRequestCta(request: HelpRequestWithRequester) {
+  const assignmentStatus = request.current_helper_assignment_status;
+
+  if (assignmentStatus) {
+    return {
+      label: assignmentStatus === 'applied' ? '신청 완료 · 수락 대기 중' : assignmentStatusLabel(assignmentStatus),
+      message:
+        assignmentStatus === 'applied'
+          ? '신청 완료! 운영자 확인 후 매칭이 확정돼요.'
+          : '이 요청은 이미 내 활동 목록에 있습니다.',
+      canApply: false,
+    };
+  }
+
+  if (request.is_full) {
+    return {
+      label: '모집 마감',
+      message: '이 요청은 모집이 마감됐어요.',
+      canApply: false,
+    };
+  }
+
+  if (request.applications_locked) {
+    return {
+      label: '신청 마감',
+      message: '이 요청은 신청 가능한 시간이 지났어요.',
+      canApply: false,
+    };
+  }
+
+  return {
+    label: '이 시간에 참여 신청하기',
+    message: '활동 시간을 확인한 뒤 참여 신청할 수 있습니다.',
+    canApply: true,
+  };
+}
+
+function adminReviewErrorMessage(message: string) {
+  if (
+    message.includes(
+      'Request is missing required publish fields or has unresolved safety risk',
+    )
+  ) {
+    return '게시하려면 필수 항목을 모두 입력하고 안전 등급을 Tier 2 또는 Tier 3으로 확정해야 합니다.';
+  }
+
+  if (message.includes('Reject reason is required')) {
+    return '반려하려면 반려 사유를 입력해야 합니다.';
+  }
+
+  if (message.includes('Title cannot be empty')) {
+    return '제목을 입력해야 합니다.';
+  }
+
+  if (message.includes('Content cannot be empty')) {
+    return '본문을 입력해야 합니다.';
+  }
+
+  if (message.includes('Only draft or pending_review requests can be edited')) {
+    return '이미 검토가 끝난 공고는 이 화면에서 수정할 수 없습니다.';
+  }
+
+  return `처리 중 오류가 발생했습니다: ${message}`;
+}
+
+function adminMatchingErrorMessage(message: string) {
+  if (message.includes('Underfilled match reason is required')) {
+    return '부족 인원으로 확정하려면 사유를 입력해야 합니다.';
+  }
+
+  if (message.includes('one or fewer accepted helpers')) {
+    return '확정된 청년이 1명 이하이면 무산 처리해야 합니다.';
+  }
+
+  if (message.includes('Failure reason is required')) {
+    return '무산 처리하려면 사유를 입력해야 합니다.';
+  }
+
+  if (message.includes('Request already has the required number of helpers')) {
+    return '이미 필요한 인원이 확정된 요청입니다.';
+  }
+
+  if (message.includes('Request is not open')) {
+    return '현재 상태에서는 이 요청을 처리할 수 없습니다.';
+  }
+
+  return `처리 중 오류가 발생했습니다: ${message}`;
+}
+
 function formatCredits(value: number) {
   return `${new Intl.NumberFormat('ko-KR').format(value)} 크레딧`;
 }
@@ -2433,7 +3330,42 @@ function calculateBaseCredit(category: HelpCategory, durationMinutes: number) {
         ? 1.2
         : 1.0;
 
-  return Math.round(15480 * (duration / 60) * multiplier);
+  return Math.round(15000 * (duration / 60) * multiplier);
+}
+
+function nullableText(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function nullableNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const nextValue = Number(trimmed);
+  return Number.isFinite(nextValue) ? nextValue : null;
+}
+
+function requesterRegistrationErrorMessage(message: string) {
+  if (message.includes('All required requester consents must be true')) {
+    return '필수 동의 3가지를 모두 확인해야 등록할 수 있습니다.';
+  }
+
+  if (message.includes('Requester phone is required')) {
+    return '전화번호를 입력해야 등록할 수 있습니다.';
+  }
+
+  if (message.includes('duplicate key')) {
+    return '이미 등록된 전화번호입니다. 기존 어르신 정보를 확인하세요.';
+  }
+
+  if (message.includes('Only mediators/admins can register requesters')) {
+    return '운영자만 어르신을 등록할 수 있습니다.';
+  }
+
+  return `등록 중 오류가 발생했습니다: ${message}`;
 }
 
 function formatDistance(value: number) {
@@ -2515,8 +3447,80 @@ function mapPublishedRequest(
     accepted_count: row.accepted_count,
     current_helper_assignment_id: row.current_helper_assignment_id,
     current_helper_assignment_status: row.current_helper_assignment_status,
+    application_deadline: row.application_deadline,
+    applications_locked: row.applications_locked,
     is_full: row.is_full,
   };
+}
+
+function mapHelperAssignment(row: HelperAssignmentRpcRow): AssignmentWithRequest {
+  const assignment = row.assignment as unknown as AssignmentRow;
+  const helpRequest = row.help_request as unknown as HelpRequestRow;
+  const requester = row.requester as unknown as RequesterSummary;
+  const companionHelpers = Array.isArray(row.companion_helpers)
+    ? (row.companion_helpers as unknown as CompanionSummary[])
+    : [];
+  const completionProofs = Array.isArray(row.completion_proofs)
+    ? (row.completion_proofs as unknown as CompletionProofRow[])
+    : [];
+  const creditLedger = Array.isArray(row.credit_ledger)
+    ? (row.credit_ledger as unknown as CreditLedgerRow[])
+    : [];
+
+  return {
+    ...assignment,
+    help_request: {
+      ...helpRequest,
+      requester,
+    },
+    companion_helpers: companionHelpers,
+    completion_proofs: completionProofs,
+    credit_ledger: creditLedger,
+  };
+}
+
+function assignmentCreditAmount(assignment: AssignmentWithRequest) {
+  return (
+    assignment.credit_ledger?.reduce((sum, credit) => sum + credit.amount, 0) ??
+    0
+  );
+}
+
+function creditCelebrationStorageKey(
+  profileId: string,
+  assignmentId: string,
+  amount: number,
+) {
+  return `doum-credit-celebrated:${profileId}:${assignmentId}:${amount}`;
+}
+
+function hasVisitStarted(appointmentTime: string | null | undefined) {
+  if (!appointmentTime) {
+    return false;
+  }
+
+  const appointmentDate = new Date(appointmentTime);
+  if (Number.isNaN(appointmentDate.getTime())) {
+    return false;
+  }
+
+  return appointmentDate.getTime() <= Date.now();
+}
+
+function personalGuidanceItems(notes: string | null | undefined) {
+  const baseGuidance = [
+    '도착 전 어르신께 전화로 방문을 알려주세요.',
+    '작업 중에는 동행 청년들과 함께 이동하고 혼자 떨어지지 마세요.',
+  ];
+
+  const noteItems =
+    notes
+      ?.split(/[\n.。]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => `운영 메모: ${item}`) ?? [];
+
+  return noteItems.length > 0 ? [...noteItems, ...baseGuidance] : baseGuidance;
 }
 
 function formatBoolean(value: boolean | null | undefined) {

@@ -458,6 +458,18 @@ export type Database = {
         };
         Returns: string;
       };
+      approve_all_assignments_for_request: {
+        Args: {
+          p_help_request_id: string;
+        };
+        Returns: number;
+      };
+      cancel_help_application: {
+        Args: {
+          p_assignment_id: string;
+        };
+        Returns: string;
+      };
       reject_assignment: {
         Args: {
           p_assignment_id: string;
@@ -558,7 +570,34 @@ export type Database = {
           current_helper_assignment_status:
             | Database['public']['Enums']['assignment_status']
             | null;
+          application_deadline: string | null;
+          applications_locked: boolean;
           is_full: boolean;
+        }[];
+      };
+      finalize_help_request_match: {
+        Args: {
+          p_help_request_id: string;
+          p_underfilled_reason?: string | null;
+        };
+        Returns: string;
+      };
+      mark_help_request_unfilled: {
+        Args: {
+          p_help_request_id: string;
+          p_reason: string;
+        };
+        Returns: string;
+      };
+      list_my_helper_assignments: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          assignment: Json;
+          help_request: Json;
+          requester: Json;
+          companion_helpers: Json;
+          completion_proofs: Json;
+          credit_ledger: Json;
         }[];
       };
       submit_completion: {
