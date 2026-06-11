@@ -98,6 +98,8 @@ type RequesterRegistrationForm = {
   consent_photo: boolean;
 };
 
+type ThemeMode = 'light' | 'dark';
+
 const adminRoles = new Set<Profile['role']>(['mediator', 'admin']);
 const helpCategoryOptions: HelpCategory[] = [
   'electronics',
@@ -126,6 +128,21 @@ const emptyRequesterRegistrationForm: RequesterRegistrationForm = {
   consent_photo: false,
 };
 
+function getInitialTheme(): ThemeMode {
+  if (typeof window === 'undefined') {
+    return 'light';
+  }
+
+  const storedTheme = window.localStorage.getItem('doum-theme');
+  if (storedTheme === 'dark' || storedTheme === 'light') {
+    return storedTheme;
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthState>({
     session: null,
@@ -133,6 +150,12 @@ export function App() {
     loading: true,
     error: null,
   });
+  const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('doum-theme', theme);
+  }, [theme]);
 
   const loadProfile = useCallback(async (session: Session | null) => {
     if (!session) {
@@ -176,15 +199,38 @@ export function App() {
   }, [loadProfile]);
 
   if (!isSupabaseConfigured) {
-    return <MissingConfig />;
+    return (
+      <MissingConfig
+        theme={theme}
+        onToggleTheme={() =>
+          setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+        }
+      />
+    );
   }
 
   if (auth.loading) {
-    return <ScreenMessage title="로딩 중" body="로그인 상태를 확인하고 있습니다." />;
+    return (
+      <ScreenMessage
+        title="로딩 중"
+        body="로그인 상태를 확인하고 있습니다."
+        theme={theme}
+        onToggleTheme={() =>
+          setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+        }
+      />
+    );
   }
 
   if (!auth.session) {
-    return <LoginPage />;
+    return (
+      <LoginPage
+        theme={theme}
+        onToggleTheme={() =>
+          setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+        }
+      />
+    );
   }
 
   if (auth.error || !auth.profile) {
@@ -195,12 +241,22 @@ export function App() {
           auth.error ??
           'You are signed in, but no matching profile row was found.'
         }
+        theme={theme}
+        onToggleTheme={() =>
+          setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+        }
       />
     );
   }
 
   return (
-    <AppShell profile={auth.profile}>
+    <AppShell
+      profile={auth.profile}
+      theme={theme}
+      onToggleTheme={() =>
+        setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+      }
+    >
       {adminRoles.has(auth.profile.role) ? (
         <AdminDashboard profile={auth.profile} />
       ) : (
@@ -210,19 +266,60 @@ export function App() {
   );
 }
 
-function MissingConfig() {
+function ThemeToggle({
+  theme,
+  onToggleTheme,
+}: {
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      aria-label={theme === 'dark' ? '밝은 화면으로 전환' : '어두운 화면으로 전환'}
+      aria-pressed={theme === 'dark'}
+      onClick={onToggleTheme}
+    >
+      {theme === 'dark' ? '☀' : '☾'}
+    </button>
+  );
+}
+
+function MissingConfig({
+  theme,
+  onToggleTheme,
+}: {
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+}) {
   return (
     <ScreenMessage
       title="Supabase environment missing"
       body="Create porori-web/.env.local from .env.example and set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+      theme={theme}
+      onToggleTheme={onToggleTheme}
     />
   );
 }
 
-function ScreenMessage({ title, body }: { title: string; body: string }) {
+function ScreenMessage({
+  title,
+  body,
+  theme,
+  onToggleTheme,
+}: {
+  title: string;
+  body: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+}) {
   return (
     <main className="screen-message">
       <section className="panel">
+        <div className="compact-theme-row">
+          <ThemeToggle theme={theme} onToggleTheme={onToggleTheme} />
+        </div>
         <img className="brand-mark compact" src={wordmarkImage} alt="DOUM" />
         <h1>{title}</h1>
         <p>{body}</p>
@@ -231,7 +328,13 @@ function ScreenMessage({ title, body }: { title: string; body: string }) {
   );
 }
 
-function LoginPage() {
+function LoginPage({
+  theme,
+  onToggleTheme,
+}: {
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in');
@@ -266,6 +369,9 @@ function LoginPage() {
   return (
     <main className="auth-page">
       <section className="auth-card">
+        <div className="compact-theme-row">
+          <ThemeToggle theme={theme} onToggleTheme={onToggleTheme} />
+        </div>
         <div className="login-brand">
           <img className="brand-logo" src={logoImage} alt="DOUM" />
           <p>이웃과 함께하는 따뜻한 커뮤니티</p>
@@ -328,19 +434,26 @@ function LoginPage() {
 
 function AppShell({
   profile,
+  theme,
+  onToggleTheme,
   children,
 }: {
   profile: Profile;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   children: React.ReactNode;
 }) {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <img className="brand-mark" src={wordmarkImage} alt="DOUM" />
-          <p className="eyebrow">
-            {adminRoles.has(profile.role) ? '운영자 콘솔' : '청년 도움 앱'}
-          </p>
+        <div className="topbar-brand">
+          <ThemeToggle theme={theme} onToggleTheme={onToggleTheme} />
+          <div>
+            <img className="brand-mark" src={wordmarkImage} alt="DOUM" />
+            <p className="eyebrow">
+              {adminRoles.has(profile.role) ? '운영자 콘솔' : '청년 도움 앱'}
+            </p>
+          </div>
         </div>
         <div className="user-block">
           <span>{profile.name}</span>
