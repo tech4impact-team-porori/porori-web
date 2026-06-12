@@ -28,20 +28,20 @@
 
 :root[data-theme='dark'] {
   color: #f3f5f6;
-  --mint: #11d7d1;
-  --mint-dark: #65f0ea;
-  --mint-soft: rgba(17, 215, 209, 0.16);
-  --page: #111315;
+  --mint: #009f99;
+  --mint-dark: #18c2ba;
+  --mint-soft: rgba(0, 159, 153, 0.18);
+  --page: #101615;
   --ink: #f3f5f6;
-  --text-soft: #c5cbcf;
-  --text-subtle: #a9b0b5;
-  --muted: #9ca4aa;
-  --line: #2d3438;
-  --surface: #171a1d;
-  --surface-raised: #1d2226;
-  --soft: #20262a;
-  --soft-2: #1b2024;
-  --soft-3: #252b30;
+  --text-soft: #d0d8d8;
+  --text-subtle: #aebbbb;
+  --muted: #9eaaaa;
+  --line: #273836;
+  --surface: #17201f;
+  --surface-raised: #1e2927;
+  --soft: #202d2b;
+  --soft-2: #1b2624;
+  --soft-3: #243230;
   --danger: #ff8b8b;
   --shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.32);
   --shadow-button: 0 8px 24px rgba(0, 0, 0, 0.3);
@@ -404,9 +404,20 @@ p {
   filter: brightness(0) invert(1);
 }
 
-:root[data-theme='dark'] .field-help,
+:root[data-theme='dark'] .field-help {
+  color: #9fd9ce;
+}
+
 :root[data-theme='dark'] .form-message {
-  color: #ffd79a;
+  border: 1px solid rgba(61, 199, 180, 0.26);
+  background: #143b36;
+  color: #d8fff7;
+}
+
+:root[data-theme='dark'] .error-message {
+  border: 1px solid rgba(255, 139, 139, 0.25);
+  background: #3a2022;
+  color: #ffd3d3;
 }
 
 :root[data-theme='dark'] .category-electronics {
@@ -441,8 +452,8 @@ p {
 }
 
 :root[data-theme='dark'] .distance-badge {
-  background: rgba(17, 215, 209, 0.16);
-  color: #84f3ee;
+  background: rgba(0, 159, 153, 0.2);
+  color: #8ff1ea;
 }
 
 .screen-message,
