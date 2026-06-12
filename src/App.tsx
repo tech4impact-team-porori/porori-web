@@ -20,6 +20,7 @@ type HelpCategory = Database['public']['Enums']['help_category'];
 type SafetyTier = Database['public']['Enums']['safety_tier'];
 type AdminCallTaskStatus =
   Database['public']['Enums']['admin_call_task_status'];
+type AdminTabId = 'requesters' | 'approval' | 'calls' | 'notifications';
 type PublishedHelpRequestRow =
   Database['public']['Functions']['list_published_help_requests']['Returns'][number];
 type HelperAssignmentRpcRow =
@@ -507,9 +508,13 @@ function AppShell({
 
 function AdminDashboard({ profile }: { profile: Profile }) {
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState<
-    'requesters' | 'approval' | 'calls' | 'notifications'
-  >('requesters');
+  const [activeTab, setActiveTab] = useState<AdminTabId>('requesters');
+  const [tabCounts, setTabCounts] = useState<Record<AdminTabId, number>>({
+    requesters: 0,
+    approval: 0,
+    calls: 0,
+    notifications: 0,
+  });
 
   const tabs = [
     { id: 'requesters', label: '어르신 등록' },
@@ -517,6 +522,56 @@ function AdminDashboard({ profile }: { profile: Profile }) {
     { id: 'calls', label: '전화 업무' },
     { id: 'notifications', label: '운영 알림' },
   ] as const;
+
+  const loadTabCounts = useCallback(async () => {
+    const [
+      pendingRequests,
+      pendingApplications,
+      pendingCompletions,
+      pendingCalls,
+      adminNotifications,
+    ] = await Promise.all([
+      supabase
+        .from('help_requests')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['draft', 'pending_review']),
+      supabase
+        .from('assignments')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['applied', 'accepted']),
+      supabase
+        .from('assignments')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'completed_submitted'),
+      supabase
+        .from('admin_call_tasks')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending'),
+      supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('channel', 'in_app')
+        .is('recipient_profile_id', null),
+    ]);
+
+    setTabCounts({
+      requesters: 0,
+      approval:
+        (pendingRequests.count ?? 0) +
+        (pendingApplications.count ?? 0) +
+        (pendingCompletions.count ?? 0),
+      calls: pendingCalls.count ?? 0,
+      notifications: adminNotifications.count ?? 0,
+    });
+  }, []);
+
+  useEffect(() => {
+    void loadTabCounts();
+  }, [loadTabCounts, activityRefreshKey]);
+
+  function markAdminActivityChanged() {
+    setActivityRefreshKey((current) => current + 1);
+  }
 
   return (
     <div className="dashboard-grid admin-dashboard">
@@ -536,7 +591,12 @@ function AdminDashboard({ profile }: { profile: Profile }) {
             className={activeTab === tab.id ? 'admin-tab active' : 'admin-tab'}
             onClick={() => setActiveTab(tab.id)}
           >
-            {tab.label}
+            <span>{tab.label}</span>
+            {tabCounts[tab.id] > 0 ? (
+              <span className="tab-count-badge" aria-label={`${tabCounts[tab.id]}건 대기`}>
+                {tabCounts[tab.id] > 99 ? '99+' : tabCounts[tab.id]}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -544,25 +604,25 @@ function AdminDashboard({ profile }: { profile: Profile }) {
       <div className="admin-tab-panels">
         {activeTab === 'requesters' ? (
           <AdminRequesterRegistrationPanel
-            onRegistered={() => setActivityRefreshKey((current) => current + 1)}
+            onRegistered={markAdminActivityChanged}
           />
         ) : null}
 
         {activeTab === 'approval' ? (
           <div className="admin-approval-stack">
             <AdminPendingRequests
-              onReviewed={() => setActivityRefreshKey((current) => current + 1)}
+              onReviewed={markAdminActivityChanged}
             />
             <AdminApplicationQueue
-              onReviewed={() => setActivityRefreshKey((current) => current + 1)}
+              onReviewed={markAdminActivityChanged}
             />
-            <AdminCompletionQueue />
+            <AdminCompletionQueue onReviewed={markAdminActivityChanged} />
           </div>
         ) : null}
 
         {activeTab === 'calls' ? (
           <AdminCallTasksPanel
-            onUpdated={() => setActivityRefreshKey((current) => current + 1)}
+            onUpdated={markAdminActivityChanged}
           />
         ) : null}
 
@@ -1480,7 +1540,7 @@ function AdminApplicationQueue({ onReviewed }: { onReviewed: () => void }) {
                   {group.request?.required_helpers ?? 3}명
                 </p>
               </div>
-              <div className="button-row compact-actions">
+              <div className="button-row compact-actions application-group-actions">
                 <button
                   type="button"
                   onClick={() => void approveAllForRequest(group.requestId)}
@@ -1737,7 +1797,7 @@ function AdminCallTasksPanel({ onUpdated }: { onUpdated: () => void }) {
   );
 }
 
-function AdminCompletionQueue() {
+function AdminCompletionQueue({ onReviewed }: { onReviewed: () => void }) {
   const [assignments, setAssignments] = useState<AssignmentWithRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1811,6 +1871,7 @@ function AdminCompletionQueue() {
       setAssignments((current) =>
         current.filter((assignment) => assignment.id !== assignmentId),
       );
+      onReviewed();
     }
 
     setWorkingId(null);

@@ -585,12 +585,23 @@ p {
 }
 
 button.admin-tab {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 48px;
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: 13px;
-  background: transparent;
+  background: var(--surface-raised);
   color: var(--text-subtle);
   box-shadow: none;
+  white-space: nowrap;
+}
+
+button.admin-tab > span:first-child {
+  grid-column: 2;
 }
 
 button.admin-tab:hover:not(:disabled) {
@@ -603,6 +614,38 @@ button.admin-tab.active {
   border-color: var(--mint);
   background: var(--mint);
   color: #ffffff;
+}
+
+.tab-count-badge {
+  grid-column: 3;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: #e54848;
+  color: #ffffff;
+  padding: 0 5px;
+  font-size: 0.68rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+button.admin-tab.active .tab-count-badge {
+  border-color: var(--mint);
+}
+
+:root[data-theme='dark'] .tab-count-badge {
+  border-color: var(--surface);
+  background: #ff5d5d;
+  color: #190909;
+}
+
+:root[data-theme='dark'] button.admin-tab.active .tab-count-badge {
+  border-color: var(--mint);
 }
 
 .admin-tab-panels,
@@ -862,6 +905,15 @@ button.admin-tab.active {
 
 .application-group-header button {
   flex: 0 0 auto;
+}
+
+.application-group-actions {
+  flex: 0 0 auto;
+  max-width: 430px;
+}
+
+.application-group-actions button {
+  min-width: 96px;
 }
 
 .compact-section-header {
@@ -1542,6 +1594,16 @@ button.danger,
     border-radius: 999px;
   }
 
+  .admin-tab-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  button.admin-tab {
+    min-height: 46px;
+    padding-inline: 10px;
+  }
+
   .panel,
   .hero-panel {
     border-radius: 18px;
@@ -1569,6 +1631,29 @@ button.danger,
   .section-header button {
     min-height: 38px;
     padding-inline: 13px;
+  }
+
+  .application-group-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .application-group-actions {
+    max-width: none;
+  }
+
+  .application-group-actions.button-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .application-group-actions.button-row button {
+    width: 100%;
+    min-height: 42px;
+    white-space: normal;
   }
 
   .user-block {
