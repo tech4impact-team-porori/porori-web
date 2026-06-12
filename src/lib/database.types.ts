@@ -680,6 +680,34 @@ export type Database = {
         };
         Returns: string;
       };
+      get_help_request_matching_state: {
+        Args: {
+          p_help_request_id: string;
+        };
+        Returns: {
+          help_request_id: string;
+          status: Database['public']['Enums']['help_request_status'];
+          required_helpers: number;
+          minimum_helpers: number;
+          capacity_helpers: number;
+          applied_count: number;
+          accepted_count: number;
+          active_count: number;
+          application_deadline: string | null;
+          cancellation_deadline: string | null;
+          application_deadline_passed: boolean;
+          cancellation_locked: boolean;
+          minimum_met: boolean;
+          capacity_full: boolean;
+          approval_ready: boolean;
+          underfilled_at_deadline: boolean;
+          must_fail_at_deadline: boolean;
+        }[];
+      };
+      refresh_matching_operational_alerts: {
+        Args: Record<PropertyKey, never>;
+        Returns: number;
+      };
       list_my_helper_assignments: {
         Args: Record<PropertyKey, never>;
         Returns: {

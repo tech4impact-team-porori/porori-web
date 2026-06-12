@@ -78,6 +78,7 @@ type NotificationPayload = {
   appointment_time?: string;
   credit_reward?: number;
   accepted_helper_count?: number;
+  active_count?: number;
   status?: string;
 };
 
@@ -2162,6 +2163,19 @@ function ActivityPanel({
     setLoading(true);
     setError(null);
 
+    if (audience === 'admin') {
+      const { error: refreshError } = await supabase.rpc(
+        'refresh_matching_operational_alerts',
+      );
+
+      if (refreshError) {
+        setError(refreshError.message);
+        setNotifications([]);
+        setLoading(false);
+        return;
+      }
+    }
+
     let query = supabase
       .from('notifications')
       .select('*')
@@ -4075,6 +4089,7 @@ function readNotificationPayload(
     appointment_time: readString(record.appointment_time),
     credit_reward: readNumber(record.credit_reward),
     accepted_helper_count: readNumber(record.accepted_helper_count),
+    active_count: readNumber(record.active_count),
     status: readString(record.status),
   };
 }
@@ -4093,6 +4108,10 @@ function notificationPurposeLabel(purpose: string) {
     request_accepted: '신청 완료',
     match_finalized: '매칭 확정',
     admin_call_task_created: '전화 업무 생성',
+    matching_capacity_full: '승인 가능',
+    matching_deadline_ready: '마감 도달',
+    matching_deadline_underfilled: '미달 판단',
+    matching_deadline_must_fail: '무산 검토',
   };
 
   return labels[purpose] ?? purpose;
@@ -4133,6 +4152,14 @@ function notificationSummary(
       return `매칭 확정: ${title}`;
     case 'admin_call_task_created':
       return `${payload.requester_name ?? '어르신'}께 매칭 안내 전화를 걸어야 합니다: ${title}`;
+    case 'matching_capacity_full':
+      return `정원 6명이 충족되어 승인 판단이 필요합니다: ${title}`;
+    case 'matching_deadline_ready':
+      return `신청 마감에 도달했습니다. ${payload.active_count ?? 0}명 신청 상태를 확인하세요: ${title}`;
+    case 'matching_deadline_underfilled':
+      return `마감 후 최소 인원 미달입니다. 진행 또는 무산을 결정하세요: ${title}`;
+    case 'matching_deadline_must_fail':
+      return `마감 후 신청자가 1명 이하입니다. 무산 처리가 필요합니다: ${title}`;
     default:
       return title;
   }
