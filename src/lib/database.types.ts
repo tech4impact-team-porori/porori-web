@@ -49,6 +49,7 @@ export type Database = {
         | 'redemption';
       call_direction: 'inbound' | 'outbound';
       call_purpose: 'intake' | 'match_confirmation' | 'happy_call';
+      admin_call_task_status: 'pending' | 'completed';
       notification_channel:
         | 'kakao'
         | 'sms'
@@ -435,12 +436,102 @@ export type Database = {
           },
         ];
       };
+      admin_call_tasks: {
+        Row: {
+          id: string;
+          help_request_id: string;
+          requester_id: string;
+          purpose: Database['public']['Enums']['call_purpose'];
+          status: Database['public']['Enums']['admin_call_task_status'];
+          requester_name: string;
+          requester_phone: string;
+          request_title: string;
+          appointment_time: string | null;
+          appointment_timezone: string;
+          accepted_helper_count: number;
+          accepted_helper_names: string[];
+          call_script: string;
+          admin_notes: string | null;
+          no_answer_count: number;
+          last_no_answer_at: string | null;
+          completed_by: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          help_request_id: string;
+          requester_id: string;
+          purpose?: Database['public']['Enums']['call_purpose'];
+          status?: Database['public']['Enums']['admin_call_task_status'];
+          requester_name: string;
+          requester_phone: string;
+          request_title: string;
+          appointment_time?: string | null;
+          appointment_timezone?: string;
+          accepted_helper_count?: number;
+          accepted_helper_names?: string[];
+          call_script: string;
+          admin_notes?: string | null;
+          no_answer_count?: number;
+          last_no_answer_at?: string | null;
+          completed_by?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['admin_call_tasks']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'admin_call_tasks_help_request_id_fkey';
+            columns: ['help_request_id'];
+            isOneToOne: false;
+            referencedRelation: 'help_requests';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'admin_call_tasks_requester_id_fkey';
+            columns: ['requester_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'admin_call_tasks_completed_by_fkey';
+            columns: ['completed_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
       accept_help_request: {
+        Args: {
+          p_help_request_id: string;
+        };
+        Returns: string;
+      };
+      complete_admin_call_task: {
+        Args: {
+          p_task_id: string;
+          p_admin_notes?: string | null;
+        };
+        Returns: string;
+      };
+      log_admin_call_no_answer: {
+        Args: {
+          p_task_id: string;
+          p_admin_notes?: string | null;
+        };
+        Returns: string;
+      };
+      queue_match_confirmation_call_task: {
         Args: {
           p_help_request_id: string;
         };

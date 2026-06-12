@@ -14,9 +14,12 @@ type CompletionProofRow =
 type CreditLedgerRow = Database['public']['Tables']['credit_ledger']['Row'];
 type NotificationRow = Database['public']['Tables']['notifications']['Row'];
 type VoiceCallRow = Database['public']['Tables']['voice_calls']['Row'];
+type AdminCallTaskRow = Database['public']['Tables']['admin_call_tasks']['Row'];
 type HelpRequestStatus = Database['public']['Enums']['help_request_status'];
 type HelpCategory = Database['public']['Enums']['help_category'];
 type SafetyTier = Database['public']['Enums']['safety_tier'];
+type AdminCallTaskStatus =
+  Database['public']['Enums']['admin_call_task_status'];
 type PublishedHelpRequestRow =
   Database['public']['Functions']['list_published_help_requests']['Returns'][number];
 type HelperAssignmentRpcRow =
@@ -70,9 +73,11 @@ type CreditCelebration = {
 type NotificationPayload = {
   title?: string;
   requester_name?: string;
+  requester_phone?: string;
   helper_name?: string;
   appointment_time?: string;
   credit_reward?: number;
+  accepted_helper_count?: number;
   status?: string;
 };
 
@@ -92,7 +97,6 @@ type RequesterRegistrationForm = {
   latitude: string;
   longitude: string;
   personal_notes: string;
-  consent_doc_url: string;
   consent_info: boolean;
   consent_voice: boolean;
   consent_photo: boolean;
@@ -122,7 +126,6 @@ const emptyRequesterRegistrationForm: RequesterRegistrationForm = {
   latitude: '',
   longitude: '',
   personal_notes: '',
-  consent_doc_url: '',
   consent_info: false,
   consent_voice: false,
   consent_photo: false,
@@ -236,15 +239,17 @@ export function App() {
   if (auth.error || !auth.profile) {
     return (
       <ScreenMessage
-        title="Profile not ready"
-        body={
-          auth.error ??
-          'You are signed in, but no matching profile row was found.'
-        }
+        title="프로필을 다시 확인해야 합니다"
+        body="로그인은 되어 있지만 현재 세션과 연결된 프로필을 찾지 못했습니다. 로컬 DB를 초기화했거나 테스트 계정을 다시 만든 뒤에 자주 발생합니다."
         theme={theme}
         onToggleTheme={() =>
           setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
         }
+        actionLabel="로그아웃하고 다시 로그인"
+        onAction={async () => {
+          await supabase.auth.signOut();
+          window.location.reload();
+        }}
       />
     );
   }
@@ -308,11 +313,15 @@ function ScreenMessage({
   body,
   theme,
   onToggleTheme,
+  actionLabel,
+  onAction,
 }: {
   title: string;
   body: string;
   theme: ThemeMode;
   onToggleTheme: () => void;
+  actionLabel?: string;
+  onAction?: () => void | Promise<void>;
 }) {
   return (
     <main className="screen-message">
@@ -323,6 +332,15 @@ function ScreenMessage({
         <img className="brand-mark compact" src={wordmarkImage} alt="DOUM" />
         <h1>{title}</h1>
         <p>{body}</p>
+        {actionLabel && onAction ? (
+          <button
+            type="button"
+            className="primary-action screen-message-action"
+            onClick={() => void onAction()}
+          >
+            {actionLabel}
+          </button>
+        ) : null}
       </section>
     </main>
   );
@@ -471,12 +489,13 @@ function AppShell({
 function AdminDashboard({ profile }: { profile: Profile }) {
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<
-    'requesters' | 'approval' | 'notifications'
+    'requesters' | 'approval' | 'calls' | 'notifications'
   >('requesters');
 
   const tabs = [
     { id: 'requesters', label: '어르신 등록' },
     { id: 'approval', label: '승인' },
+    { id: 'calls', label: '전화 업무' },
     { id: 'notifications', label: '운영 알림' },
   ] as const;
 
@@ -522,6 +541,12 @@ function AdminDashboard({ profile }: { profile: Profile }) {
           </div>
         ) : null}
 
+        {activeTab === 'calls' ? (
+          <AdminCallTasksPanel
+            onUpdated={() => setActivityRefreshKey((current) => current + 1)}
+          />
+        ) : null}
+
         {activeTab === 'notifications' ? (
           <ActivityPanel
             audience="admin"
@@ -542,6 +567,8 @@ function AdminRequesterRegistrationPanel({
   const [form, setForm] = useState<RequesterRegistrationForm>(
     emptyRequesterRegistrationForm,
   );
+  const [consentDocFile, setConsentDocFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
@@ -567,7 +594,35 @@ function AdminRequesterRegistrationPanel({
       return;
     }
 
+    if (!consentDocFile) {
+      setFeedback({
+        type: 'error',
+        text: '서명된 수기 동의서 스캔 파일을 업로드해야 등록할 수 있습니다.',
+      });
+      return;
+    }
+
     setBusy(true);
+
+    const consentDocPath = buildConsentDocumentPath(
+      form.phone,
+      consentDocFile.name,
+    );
+    const { error: uploadError } = await supabase.storage
+      .from('consent-documents')
+      .upload(consentDocPath, consentDocFile, {
+        contentType: consentDocFile.type,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      setFeedback({
+        type: 'error',
+        text: `동의서 파일 업로드에 실패했습니다: ${uploadError.message}`,
+      });
+      setBusy(false);
+      return;
+    }
 
     const { data, error } = await supabase.rpc('register_requester_profile', {
       p_name: form.name.trim(),
@@ -581,7 +636,7 @@ function AdminRequesterRegistrationPanel({
       p_consent_info: form.consent_info,
       p_consent_voice: form.consent_voice,
       p_consent_photo: form.consent_photo,
-      p_consent_doc_url: nullableText(form.consent_doc_url),
+      p_consent_doc_url: consentDocPath,
     });
 
     if (error) {
@@ -595,6 +650,8 @@ function AdminRequesterRegistrationPanel({
         text: `어르신 등록을 완료했습니다. 등록 ID: ${data}`,
       });
       setForm(emptyRequesterRegistrationForm);
+      setConsentDocFile(null);
+      setFileInputKey((current) => current + 1);
       onRegistered();
     }
 
@@ -695,15 +752,25 @@ function AdminRequesterRegistrationPanel({
               rows={3}
             />
           </label>
-          <label className="form-wide">
-            수기 동의서 스캔 경로
+          <label className="form-wide file-upload-field">
+            <span>
+              수기 동의서 스캔 파일 <span className="required-marker">*</span>
+            </span>
             <input
-              value={form.consent_doc_url}
+              key={fileInputKey}
+              type="file"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              required
               onChange={(event) =>
-                updateField('consent_doc_url', event.target.value)
+                setConsentDocFile(event.target.files?.[0] ?? null)
               }
-              placeholder="consent-documents/..."
             />
+            <small>
+              PDF, JPG, PNG, WebP 파일을 비공개 Supabase Storage에 저장합니다.
+            </small>
+            {consentDocFile ? (
+              <span className="file-upload-name">{consentDocFile.name}</span>
+            ) : null}
           </label>
         </div>
 
@@ -1123,6 +1190,219 @@ function AdminApplicationQueue({ onReviewed }: { onReviewed: () => void }) {
             </div>
           </section>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function AdminCallTasksPanel({ onUpdated }: { onUpdated: () => void }) {
+  const [tasks, setTasks] = useState<AdminCallTaskRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [workingId, setWorkingId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    const { data, error: taskError } = await supabase
+      .from('admin_call_tasks')
+      .select('*')
+      .order('status', { ascending: true })
+      .order('created_at', { ascending: false });
+
+    if (taskError) {
+      setError(taskError.message);
+      setTasks([]);
+    } else {
+      const nextTasks = data ?? [];
+      setTasks(nextTasks);
+      setNotes((current) => {
+        const nextNotes = { ...current };
+        for (const task of nextTasks) {
+          nextNotes[task.id] = current[task.id] ?? task.admin_notes ?? '';
+        }
+        return nextNotes;
+      });
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
+
+  async function completeTask(taskId: string) {
+    setWorkingId(taskId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc('complete_admin_call_task', {
+      p_task_id: taskId,
+      p_admin_notes: notes[taskId] ?? null,
+    });
+
+    if (rpcError) {
+      setError(adminCallTaskErrorMessage(rpcError.message));
+    } else {
+      await loadTasks();
+      onUpdated();
+    }
+
+    setWorkingId(null);
+  }
+
+  async function logNoAnswer(taskId: string) {
+    setWorkingId(taskId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc('log_admin_call_no_answer', {
+      p_task_id: taskId,
+      p_admin_notes: notes[taskId] ?? null,
+    });
+
+    if (rpcError) {
+      setError(adminCallTaskErrorMessage(rpcError.message));
+    } else {
+      await loadTasks();
+      onUpdated();
+    }
+
+    setWorkingId(null);
+  }
+
+  const pendingCount = tasks.filter((task) => task.status === 'pending').length;
+
+  return (
+    <section className="panel">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">전화 업무</p>
+          <h2>어르신 콜백 목록</h2>
+          <p className="hint">
+            매칭이 확정되면 어르신께 직접 안내할 통화 스크립트가 생성됩니다.
+          </p>
+        </div>
+        <button type="button" onClick={() => void loadTasks()} disabled={loading}>
+          새로고침
+        </button>
+      </div>
+
+      {error ? <p className="error-message">{error}</p> : null}
+      {loading ? <p className="muted">전화 업무를 불러오는 중...</p> : null}
+      {!loading && tasks.length === 0 ? (
+        <p className="muted">아직 처리할 전화 업무가 없습니다.</p>
+      ) : null}
+      {!loading && pendingCount > 0 ? (
+        <p className="form-message">대기 중인 어르신 콜백이 {pendingCount}건 있습니다.</p>
+      ) : null}
+
+      <div className="call-task-list">
+        {tasks.map((task) => {
+          const isPending = task.status === 'pending';
+          const helperNames =
+            task.accepted_helper_names.length > 0
+              ? task.accepted_helper_names.join(', ')
+              : '-';
+
+          return (
+            <article key={task.id} className="request-card call-task-card">
+              <div className="application-group-header">
+                <div>
+                  <span className={`status-badge call-status-${task.status}`}>
+                    {adminCallTaskStatusLabel(task.status)}
+                  </span>
+                  <h3>{task.request_title}</h3>
+                  <p>
+                    {task.requester_name} 어르신 · {task.requester_phone}
+                  </p>
+                </div>
+                <a
+                  className="button-link"
+                  href={phoneHref(task.requester_phone)}
+                  aria-label={`${task.requester_name} 어르신에게 전화하기`}
+                >
+                  전화 걸기
+                </a>
+              </div>
+
+              <dl className="meta-grid">
+                <div>
+                  <dt>방문 시간</dt>
+                  <dd>{formatDateTime(task.appointment_time)}</dd>
+                </div>
+                <div>
+                  <dt>확정 인원</dt>
+                  <dd>{task.accepted_helper_count}명</dd>
+                </div>
+                <div>
+                  <dt>확정 청년</dt>
+                  <dd>{helperNames}</dd>
+                </div>
+                <div>
+                  <dt>생성 시각</dt>
+                  <dd>{formatDateTime(task.created_at)}</dd>
+                </div>
+                <div>
+                  <dt>부재중 시도</dt>
+                  <dd>{task.no_answer_count}회</dd>
+                </div>
+                <div>
+                  <dt>마지막 부재중</dt>
+                  <dd>{formatDateTime(task.last_no_answer_at)}</dd>
+                </div>
+              </dl>
+
+              <div className="call-script-box">
+                <p className="eyebrow">통화 스크립트</p>
+                <p>{task.call_script}</p>
+              </div>
+
+              <label className="form-wide">
+                통화 메모
+                <textarea
+                  value={notes[task.id] ?? ''}
+                  onChange={(event) =>
+                    setNotes((current) => ({
+                      ...current,
+                      [task.id]: event.target.value,
+                    }))
+                  }
+                  placeholder="예: 통화 완료, 일정 재확인함"
+                  rows={3}
+                  disabled={!isPending}
+                />
+              </label>
+
+              {task.completed_at ? (
+                <p className="hint">
+                  처리 시각: {formatDateTime(task.completed_at)}
+                </p>
+              ) : null}
+
+              {isPending ? (
+                <div className="button-row">
+                  <button
+                    type="button"
+                    onClick={() => void completeTask(task.id)}
+                    disabled={workingId === task.id}
+                  >
+                    통화 완료
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void logNoAnswer(task.id)}
+                    disabled={workingId === task.id}
+                  >
+                    부재중 기록
+                  </button>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -3284,6 +3564,10 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function phoneHref(phone: string) {
+  return `tel:${phone.replace(/[^\d+]/g, '')}`;
+}
+
 function categoryLabel(category: HelpRequestRow['category']) {
   const labels: Record<HelpRequestRow['category'], string> = {
     electronics: '전자제품',
@@ -3336,6 +3620,15 @@ function assignmentStatusLabel(status: AssignmentRow['status']) {
     rejected: '신청 반려',
     cancelled: '취소',
     disputed: '분쟁',
+  };
+
+  return labels[status];
+}
+
+function adminCallTaskStatusLabel(status: AdminCallTaskStatus) {
+  const labels: Record<AdminCallTaskStatus, string> = {
+    pending: '전화 대기',
+    completed: '통화 완료',
   };
 
   return labels[status];
@@ -3430,6 +3723,22 @@ function adminMatchingErrorMessage(message: string) {
   return `처리 중 오류가 발생했습니다: ${message}`;
 }
 
+function adminCallTaskErrorMessage(message: string) {
+  if (message.includes('Only mediators/admins can update admin call tasks')) {
+    return '운영자만 전화 업무를 처리할 수 있습니다.';
+  }
+
+  if (message.includes('Admin call task not found')) {
+    return '전화 업무를 찾을 수 없습니다.';
+  }
+
+  if (message.includes('Only pending call tasks can record no-answer attempts')) {
+    return '이미 완료된 전화 업무에는 부재중을 기록할 수 없습니다.';
+  }
+
+  return `전화 업무 처리 중 오류가 발생했습니다: ${message}`;
+}
+
 function formatCredits(value: number) {
   return `${new Intl.NumberFormat('ko-KR').format(value)} 크레딧`;
 }
@@ -3459,6 +3768,28 @@ function nullableNumber(value: string) {
 
   const nextValue = Number(trimmed);
   return Number.isFinite(nextValue) ? nextValue : null;
+}
+
+function buildConsentDocumentPath(phone: string, fileName: string) {
+  const requesterKey = phone.replace(/\D/g, '') || 'unknown-requester';
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:.TZ]/g, '')
+    .slice(0, 14);
+  const extension = (fileName.split('.').pop() ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  const baseName =
+    fileName
+      .replace(/\.[^/.]+$/, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'consent';
+
+  return `requesters/${requesterKey}/${timestamp}-${baseName}${
+    extension ? `.${extension}` : ''
+  }`;
 }
 
 function requesterRegistrationErrorMessage(message: string) {
@@ -3741,9 +4072,11 @@ function readNotificationPayload(
   return {
     title: readString(record.title),
     requester_name: readString(record.requester_name),
+    requester_phone: readString(record.requester_phone),
     helper_name: readString(record.helper_name),
     appointment_time: readString(record.appointment_time),
     credit_reward: readNumber(record.credit_reward),
+    accepted_helper_count: readNumber(record.accepted_helper_count),
     status: readString(record.status),
   };
 }
@@ -3760,6 +4093,8 @@ function notificationPurposeLabel(purpose: string) {
     assignment_approved: '매칭 승인',
     assignment_rejected: '신청 반려',
     request_accepted: '신청 완료',
+    match_finalized: '매칭 확정',
+    admin_call_task_created: '전화 업무 생성',
   };
 
   return labels[purpose] ?? purpose;
@@ -3796,6 +4131,10 @@ function notificationSummary(
       return `매칭 승인: ${title}`;
     case 'assignment_rejected':
       return `신청 반려: ${title}`;
+    case 'match_finalized':
+      return `매칭 확정: ${title}`;
+    case 'admin_call_task_created':
+      return `${payload.requester_name ?? '어르신'}께 매칭 안내 전화를 걸어야 합니다: ${title}`;
     default:
       return title;
   }
