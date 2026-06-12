@@ -26,6 +26,8 @@ type HelperAssignmentRpcRow =
   Database['public']['Functions']['list_my_helper_assignments']['Returns'][number];
 type HelpRequestDetailRow =
   Database['public']['Functions']['get_help_request_detail']['Returns'][number];
+type RegisteredRequesterRow =
+  Database['public']['Functions']['list_admin_requester_profiles']['Returns'][number];
 
 type RequesterSummary = Pick<
   Profile,
@@ -710,6 +712,37 @@ function AdminRequesterRegistrationPanel({
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [requesters, setRequesters] = useState<RegisteredRequesterRow[]>([]);
+  const [loadingRequesters, setLoadingRequesters] = useState(false);
+  const [requesterListError, setRequesterListError] = useState<string | null>(
+    null,
+  );
+
+  const loadRequesterDirectory = useCallback(async () => {
+    setLoadingRequesters(true);
+    setRequesterListError(null);
+
+    const { data, error } = await supabase.rpc(
+      'list_admin_requester_profiles',
+    );
+
+    if (error) {
+      setRequesterListError(requesterDirectoryErrorMessage(error.message));
+    } else {
+      setRequesters(data ?? []);
+    }
+
+    setLoadingRequesters(false);
+  }, []);
+
+  useEffect(() => {
+    if (!directoryOpen) {
+      return;
+    }
+
+    void loadRequesterDirectory();
+  }, [directoryOpen, loadRequesterDirectory]);
 
   function updateField<K extends keyof RequesterRegistrationForm>(
     key: K,
@@ -789,6 +822,9 @@ function AdminRequesterRegistrationPanel({
       setConsentDocFile(null);
       setFileInputKey((current) => current + 1);
       onRegistered();
+      if (directoryOpen) {
+        void loadRequesterDirectory();
+      }
     }
 
     setBusy(false);
@@ -801,6 +837,13 @@ function AdminRequesterRegistrationPanel({
           <p className="eyebrow">어르신 등록</p>
           <h2>대면 수기 등록</h2>
         </div>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => setDirectoryOpen(true)}
+        >
+          등록 명단 보기
+        </button>
       </div>
 
       <form className="requester-registration-form" onSubmit={handleSubmit}>
@@ -862,28 +905,16 @@ function AdminRequesterRegistrationPanel({
               updateField('longitude', formatCoordinate(match.longitude));
             }}
           />
-          <label>
-            위도
-            <input
-              type="number"
-              inputMode="decimal"
-              step="any"
-              value={form.latitude}
-              onChange={(event) => updateField('latitude', event.target.value)}
-              placeholder="36.413"
-            />
-          </label>
-          <label>
-            경도
-            <input
-              type="number"
-              inputMode="decimal"
-              step="any"
-              value={form.longitude}
-              onChange={(event) => updateField('longitude', event.target.value)}
-              placeholder="127.385"
-            />
-          </label>
+          <div className="coordinate-row form-wide">
+            <label>
+              위도
+              <input value={form.latitude} placeholder="좌표 찾기 후 자동 입력" readOnly />
+            </label>
+            <label>
+              경도
+              <input value={form.longitude} placeholder="좌표 찾기 후 자동 입력" readOnly />
+            </label>
+          </div>
           <label className="form-wide">
             개인 특이사항
             <textarea
@@ -967,7 +998,162 @@ function AdminRequesterRegistrationPanel({
           </button>
         </div>
       </form>
+
+      {directoryOpen ? (
+        <RequesterDirectoryModal
+          requesters={requesters}
+          loading={loadingRequesters}
+          error={requesterListError}
+          onClose={() => setDirectoryOpen(false)}
+          onRefresh={() => void loadRequesterDirectory()}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function RequesterDirectoryModal({
+  requesters,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+}: {
+  requesters: RegisteredRequesterRow[];
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  return (
+    <Modal title="등록 어르신 명단" onClose={onClose}>
+      <div className="detail-stack">
+        <div className="section-header compact-section-header">
+          <p className="muted">
+            등록된 어르신 {requesters.length.toLocaleString('ko-KR')}명
+          </p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={onRefresh}
+            disabled={loading}
+          >
+            {loading ? '불러오는 중...' : '새로고침'}
+          </button>
+        </div>
+
+        {error ? <p className="error-message">{error}</p> : null}
+        {loading && requesters.length === 0 ? (
+          <p className="muted">등록 명단을 불러오는 중...</p>
+        ) : null}
+        {!loading && requesters.length === 0 && !error ? (
+          <div className="empty-state">
+            <img src={logoImage} alt="" />
+            <p>아직 등록된 어르신이 없어요</p>
+          </div>
+        ) : null}
+
+        {requesters.length > 0 ? (
+          <ol className="requester-directory-list">
+            {requesters.map((requester) => {
+              const expanded = expandedId === requester.id;
+
+              return (
+                <li key={requester.id} className="requester-directory-item">
+                  <div className="requester-directory-summary">
+                    <strong>{requester.name}</strong>
+                    <span>{requester.phone ?? '-'}</span>
+                    <time dateTime={requester.created_at}>
+                      {formatDate(requester.created_at)}
+                    </time>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() =>
+                        setExpandedId(expanded ? null : requester.id)
+                      }
+                    >
+                      {expanded ? '닫기' : '상세'}
+                    </button>
+                  </div>
+
+                  {expanded ? (
+                    <RequesterDirectoryDetail requester={requester} />
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
+function RequesterDirectoryDetail({
+  requester,
+}: {
+  requester: RegisteredRequesterRow;
+}) {
+  return (
+    <div className="requester-directory-detail">
+      <dl className="meta-grid">
+        <div>
+          <dt>성함</dt>
+          <dd>{requester.name}</dd>
+        </div>
+        <div>
+          <dt>전화번호</dt>
+          <dd>{requester.phone ?? '-'}</dd>
+        </div>
+        <div>
+          <dt>마을</dt>
+          <dd>{requester.village || '-'}</dd>
+        </div>
+        <div>
+          <dt>등록일</dt>
+          <dd>{formatDateTime(requester.created_at)}</dd>
+        </div>
+        <div>
+          <dt>공개 주소</dt>
+          <dd>{requester.address_public ?? '-'}</dd>
+        </div>
+        <div>
+          <dt>상세 주소</dt>
+          <dd>{requester.address_detail ?? '-'}</dd>
+        </div>
+        <div>
+          <dt>위도</dt>
+          <dd>{requester.latitude ?? '-'}</dd>
+        </div>
+        <div>
+          <dt>경도</dt>
+          <dd>{requester.longitude ?? '-'}</dd>
+        </div>
+        <div>
+          <dt>개인 특이사항</dt>
+          <dd>{requester.personal_notes ?? '비공개 메모 없음'}</dd>
+        </div>
+        <div>
+          <dt>개인정보 동의</dt>
+          <dd>{formatBoolean(requester.consent_info)}</dd>
+        </div>
+        <div>
+          <dt>통화 녹음 동의</dt>
+          <dd>{formatBoolean(requester.consent_voice)}</dd>
+        </div>
+        <div>
+          <dt>인증 사진 동의</dt>
+          <dd>{formatBoolean(requester.consent_photo)}</dd>
+        </div>
+      </dl>
+      <details className="proof-path-details">
+        <summary>수기 동의서 파일 경로</summary>
+        <p>{requester.consent_doc_url ?? '-'}</p>
+      </details>
+    </div>
   );
 }
 
@@ -2661,26 +2847,24 @@ function AdminReviewModal({
               );
             }}
           />
-          <label>
-            위도
-            <input
-              inputMode="decimal"
-              value={form.location_latitude}
-              onChange={(event) =>
-                updateField('location_latitude', event.target.value)
-              }
-            />
-          </label>
-          <label>
-            경도
-            <input
-              inputMode="decimal"
-              value={form.location_longitude}
-              onChange={(event) =>
-                updateField('location_longitude', event.target.value)
-              }
-            />
-          </label>
+          <div className="coordinate-row review-wide">
+            <label>
+              위도
+              <input
+                value={form.location_latitude}
+                placeholder="좌표 찾기 후 자동 입력"
+                readOnly
+              />
+            </label>
+            <label>
+              경도
+              <input
+                value={form.location_longitude}
+                placeholder="좌표 찾기 후 자동 입력"
+                readOnly
+              />
+            </label>
+          </div>
           <label className="review-wide">
             운영자 메모
             <textarea
@@ -3774,6 +3958,17 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatDate(value: string | null) {
+  if (!value) {
+    return '미정';
+  }
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'medium',
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(value));
+}
+
 function phoneHref(phone: string) {
   return `tel:${phone.replace(/[^\d+]/g, '')}`;
 }
@@ -3984,6 +4179,14 @@ function adminCallTaskErrorMessage(message: string) {
   }
 
   return `전화 업무 처리 중 오류가 발생했습니다: ${message}`;
+}
+
+function requesterDirectoryErrorMessage(message: string) {
+  if (message.includes('Only mediators/admins can view requester profiles')) {
+    return '운영자만 등록 어르신 명단을 확인할 수 있습니다.';
+  }
+
+  return `등록 명단을 불러오는 중 오류가 발생했습니다: ${message}`;
 }
 
 function formatCredits(value: number) {

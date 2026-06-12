@@ -168,6 +168,19 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(0, 211, 205, 0.14);
 }
 
+input[readonly],
+textarea[readonly] {
+  cursor: default;
+  background: var(--soft-3);
+  color: var(--muted);
+}
+
+input[readonly]:focus,
+textarea[readonly]:focus {
+  border-color: var(--line);
+  box-shadow: none;
+}
+
 .readonly-field {
   display: flex;
   align-items: center;
@@ -633,6 +646,16 @@ button.admin-tab.active {
   grid-column: 1 / -1;
 }
 
+.coordinate-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.coordinate-row label {
+  min-width: 0;
+}
+
 .consent-fieldset {
   display: grid;
   gap: 10px;
@@ -839,6 +862,71 @@ button.admin-tab.active {
 
 .application-group-header button {
   flex: 0 0 auto;
+}
+
+.compact-section-header {
+  margin-bottom: 0;
+}
+
+.compact-section-header p {
+  margin: 0;
+}
+
+.requester-directory-list {
+  display: grid;
+  gap: 10px;
+  max-height: 540px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.requester-directory-item {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--soft-2);
+  padding: 10px;
+}
+
+.requester-directory-summary {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 1fr) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.requester-directory-summary strong,
+.requester-directory-summary span,
+.requester-directory-summary time {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.requester-directory-summary strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.requester-directory-summary span,
+.requester-directory-summary time {
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.requester-directory-summary button {
+  min-height: 36px;
+  padding-inline: 12px;
+}
+
+.requester-directory-detail {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
 }
 
 .call-task-list {
@@ -1518,6 +1606,10 @@ button.danger,
     grid-template-columns: 1fr;
   }
 
+  .coordinate-row {
+    grid-template-columns: 1fr;
+  }
+
   .geocode-control-header,
   .geocode-result {
     align-items: stretch;
@@ -1526,6 +1618,14 @@ button.danger,
 
   .geocode-control-header button,
   .geocode-result button {
+    width: 100%;
+  }
+
+  .requester-directory-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .requester-directory-summary button {
     width: 100%;
   }
 

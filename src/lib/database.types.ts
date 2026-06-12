@@ -601,6 +601,26 @@ export type Database = {
         };
         Returns: string;
       };
+      list_admin_requester_profiles: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          id: string;
+          name: string;
+          phone: string | null;
+          village: string;
+          address_public: string | null;
+          address_detail: string | null;
+          latitude: number | null;
+          longitude: number | null;
+          personal_notes: string | null;
+          consent_info: boolean | null;
+          consent_voice: boolean | null;
+          consent_photo: boolean | null;
+          consent_doc_url: string | null;
+          registered_by: string | null;
+          created_at: string;
+        }[];
+      };
       straight_line_distance_meters: {
         Args: {
           p_lat1: number | null;
