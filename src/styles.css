@@ -672,6 +672,74 @@ button.admin-tab.active {
   overflow-wrap: anywhere;
 }
 
+.geocode-control {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--soft-2);
+  padding: 12px;
+}
+
+.geocode-control-header,
+.geocode-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.geocode-control-header strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.geocode-control-header p,
+.geocode-result p {
+  margin: 0;
+}
+
+.geocode-control-header p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.geocode-result {
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 11px;
+}
+
+.geocode-result > div {
+  min-width: 0;
+}
+
+.geocode-result p {
+  margin-top: 7px;
+  color: var(--ink);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.geocode-result small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.geocode-result button,
+.geocode-control-header button {
+  flex: 0 0 auto;
+}
+
+.compact {
+  margin: 0;
+}
+
 .eyebrow {
   margin-bottom: 7px;
   color: var(--text-subtle);
@@ -1437,6 +1505,17 @@ button.danger,
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .geocode-control-header,
+  .geocode-result {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .geocode-control-header button,
+  .geocode-result button {
+    width: 100%;
   }
 
   .activity-item {

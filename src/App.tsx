@@ -24,6 +24,8 @@ type PublishedHelpRequestRow =
   Database['public']['Functions']['list_published_help_requests']['Returns'][number];
 type HelperAssignmentRpcRow =
   Database['public']['Functions']['list_my_helper_assignments']['Returns'][number];
+type HelpRequestDetailRow =
+  Database['public']['Functions']['get_help_request_detail']['Returns'][number];
 
 type RequesterSummary = Pick<
   Profile,
@@ -47,6 +49,8 @@ type HelpRequestWithRequester = HelpRequestRow & {
   application_deadline?: string | null;
   applications_locked?: boolean;
   is_full?: boolean;
+  can_apply?: boolean;
+  apply_block_reason?: string | null;
 };
 
 type AssignmentWithRequest = AssignmentRow & {
@@ -68,6 +72,20 @@ type CreditCelebration = {
   requesterName: string;
   amount: number;
   totalCredits: number;
+};
+
+type GeocodeMatch = {
+  provider: 'vworld';
+  sourceType: 'road' | 'parcel';
+  matchedAddress: string;
+  latitude: number;
+  longitude: number;
+};
+
+type GeocodeResponse = {
+  query?: string;
+  match?: GeocodeMatch | null;
+  error?: string;
 };
 
 type NotificationPayload = {
@@ -558,6 +576,125 @@ function AdminDashboard({ profile }: { profile: Profile }) {
   );
 }
 
+function GeocodeLookupControl({
+  address,
+  onApply,
+}: {
+  address: string;
+  onApply: (match: GeocodeMatch) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [match, setMatch] = useState<GeocodeMatch | null>(null);
+  const [message, setMessage] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  const normalizedAddress = address.trim();
+
+  async function lookup() {
+    if (!normalizedAddress) {
+      setMessage({
+        tone: 'error',
+        text: '좌표를 찾을 주소를 먼저 입력하세요.',
+      });
+      return;
+    }
+
+    setBusy(true);
+    setMatch(null);
+    setMessage(null);
+
+    const { data, error } = await supabase.functions.invoke<GeocodeResponse>(
+      'geocode-address',
+      {
+        body: {
+          address: normalizedAddress,
+        },
+      },
+    );
+
+    if (error || data?.error || !data?.match) {
+      setMessage({
+        tone: 'error',
+        text:
+          data?.error ??
+          error?.message ??
+          '주소 좌표를 찾지 못했습니다. 주소를 더 자세히 입력해 주세요.',
+      });
+    } else {
+      setMatch(data.match);
+      setMessage({
+        tone: 'success',
+        text: '좌표 후보를 찾았습니다. 주소를 확인한 뒤 적용하세요.',
+      });
+    }
+
+    setBusy(false);
+  }
+
+  function applyMatch() {
+    if (!match) {
+      return;
+    }
+
+    onApply(match);
+    setMessage({
+      tone: 'success',
+      text: '좌표를 입력칸에 적용했습니다. 저장해야 최종 반영됩니다.',
+    });
+  }
+
+  return (
+    <div className="geocode-control form-wide">
+      <div className="geocode-control-header">
+        <div>
+          <strong>주소 좌표 찾기</strong>
+          <p>VWorld에서 주소를 위도/경도로 변환합니다.</p>
+        </div>
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy || !normalizedAddress}
+          onClick={lookup}
+        >
+          {busy ? '찾는 중...' : '좌표 찾기'}
+        </button>
+      </div>
+
+      {match ? (
+        <div className="geocode-result">
+          <div>
+            <span className="status-badge">
+              {match.sourceType === 'road' ? '도로명' : '지번'}
+            </span>
+            <p>{match.matchedAddress}</p>
+            <small>
+              위도 {formatCoordinate(match.latitude)} · 경도{' '}
+              {formatCoordinate(match.longitude)}
+            </small>
+          </div>
+          <button type="button" onClick={applyMatch}>
+            좌표 적용
+          </button>
+        </div>
+      ) : null}
+
+      {message ? (
+        <p
+          className={
+            message.tone === 'error'
+              ? 'error-message compact'
+              : 'form-message compact'
+          }
+        >
+          {message.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function AdminRequesterRegistrationPanel({
   onRegistered,
 }: {
@@ -718,6 +855,13 @@ function AdminRequesterRegistrationPanel({
               placeholder="다로리 30길 12번지"
             />
           </label>
+          <GeocodeLookupControl
+            address={form.address_detail || form.address_public}
+            onApply={(match) => {
+              updateField('latitude', formatCoordinate(match.latitude));
+              updateField('longitude', formatCoordinate(match.longitude));
+            }}
+          />
           <label>
             위도
             <input
@@ -1811,28 +1955,13 @@ function HelperFeed({
               <>
                 <button
                   type="button"
-                  className="secondary"
                   onClick={() => setSelectedRequest(request)}
                 >
-                  상세
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void acceptRequest(request.id)}
-                  disabled={
-                    workingId === request.id ||
-                    Boolean(request.current_helper_assignment_status) ||
-                    request.is_full === true ||
-                    request.applications_locked === true
-                  }
-                >
-                  {request.current_helper_assignment_status
-                    ? '신청함'
-                    : request.is_full
-                      ? '마감'
-                      : request.applications_locked
-                        ? '신청 마감'
-                        : '도움 신청'}
+                  {request.current_helper_assignment_status ||
+                  request.is_full ||
+                  request.applications_locked
+                    ? '상세'
+                    : '상세 / 신청'}
                 </button>
               </>
             }
@@ -2522,6 +2651,16 @@ function AdminReviewModal({
               }
             />
           </label>
+          <GeocodeLookupControl
+            address={form.location_detail || form.location_public}
+            onApply={(match) => {
+              updateField('location_latitude', formatCoordinate(match.latitude));
+              updateField(
+                'location_longitude',
+                formatCoordinate(match.longitude),
+              );
+            }}
+          />
           <label>
             위도
             <input
@@ -2636,14 +2775,67 @@ function RequestDetailModal({
   audience: 'admin' | 'helper';
   request: HelpRequestWithRequester;
   working?: boolean;
-  onApply?: () => void;
+  onApply?: () => void | Promise<void>;
   onClose: () => void;
 }) {
-  const requester = normalizeOne(request.requester);
+  const [detailRequest, setDetailRequest] =
+    useState<HelpRequestWithRequester | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(audience === 'helper');
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const displayRequest = detailRequest ?? request;
+  const requester = normalizeOne(displayRequest.requester);
   const [voiceCalls, setVoiceCalls] = useState<VoiceCallRow[]>([]);
   const [loadingVoice, setLoadingVoice] = useState(audience === 'admin');
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const helperCta = helperRequestCta(request);
+  const [applying, setApplying] = useState(false);
+  const helperCta = helperRequestCta(displayRequest);
+
+  const loadDetail = useCallback(async () => {
+    if (audience !== 'helper') {
+      setDetailRequest(null);
+      setLoadingDetail(false);
+      setDetailError(null);
+      return;
+    }
+
+    setLoadingDetail(true);
+    setDetailError(null);
+
+    const { data, error } = await supabase.rpc('get_help_request_detail', {
+      p_help_request_id: request.id,
+      p_latitude: null,
+      p_longitude: null,
+    });
+
+    if (error) {
+      setDetailError(error.message);
+      setDetailRequest(null);
+    } else {
+      setDetailRequest(
+        data && data.length > 0 ? mapHelpRequestDetail(data[0]) : null,
+      );
+    }
+
+    setLoadingDetail(false);
+  }, [audience, request.id]);
+
+  useEffect(() => {
+    void loadDetail();
+  }, [loadDetail]);
+
+  async function handleApplyFromDetail() {
+    if (!onApply || !helperCta.canApply) {
+      return;
+    }
+
+    setApplying(true);
+    try {
+      await onApply();
+      await loadDetail();
+    } finally {
+      setApplying(false);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -2663,7 +2855,7 @@ function RequestDetailModal({
     supabase
       .from('voice_calls')
       .select('*')
-      .eq('help_request_id', request.id)
+      .eq('help_request_id', displayRequest.id)
       .order('created_at', { ascending: false })
       .limit(3)
       .then(({ data, error }) => {
@@ -2684,7 +2876,7 @@ function RequestDetailModal({
     return () => {
       mounted = false;
     };
-  }, [audience, request.id]);
+  }, [audience, displayRequest.id]);
 
   const latestVoiceCall = voiceCalls[0] ?? null;
 
@@ -2694,10 +2886,15 @@ function RequestDetailModal({
       onClose={onClose}
     >
       <div className="detail-stack">
+        {loadingDetail ? (
+          <p className="muted">상세 정보를 불러오는 중...</p>
+        ) : null}
+        {detailError ? <p className="error-message">{detailError}</p> : null}
+
         <div>
-          <span className="status-badge">{statusLabel(request.status)}</span>
-          <h3>{request.title}</h3>
-          <p>{request.content}</p>
+          <span className="status-badge">{statusLabel(displayRequest.status)}</span>
+          <h3>{displayRequest.title}</h3>
+          <p>{displayRequest.content}</p>
         </div>
 
         <dl className="meta-grid">
@@ -2712,46 +2909,47 @@ function RequestDetailModal({
             </div>
           ) : null}
           <div>
-            <dt>방문 시간</dt>
-            <dd>{formatDateTime(request.appointment_time)}</dd>
+            <dt>확정 활동 시간</dt>
+            <dd>{formatDateTime(displayRequest.appointment_time)}</dd>
           </div>
           <div>
             <dt>요청 장소</dt>
-            <dd>{request.location_public ?? requester?.address_public ?? '-'}</dd>
+            <dd>{displayRequest.location_public ?? requester?.address_public ?? '-'}</dd>
           </div>
           {audience === 'admin' ? (
             <div>
               <dt>상세 주소</dt>
               <dd>
-                {request.location_detail ?? requester?.address_detail ?? '-'}
+                {displayRequest.location_detail ?? requester?.address_detail ?? '-'}
               </dd>
             </div>
           ) : null}
           <div>
             <dt>카테고리</dt>
-            <dd>{categoryLabel(request.category)}</dd>
+            <dd>{categoryLabel(displayRequest.category)}</dd>
           </div>
           <div>
             <dt>지급 예정 크레딧</dt>
-            <dd>{formatCredits(request.credit_reward)}</dd>
+            <dd>{formatCredits(displayRequest.credit_reward)}</dd>
           </div>
           <div>
             <dt>필요 인원</dt>
             <dd>
-              {request.accepted_count ?? 0}/{request.required_helpers}명 확정
+              {displayRequest.accepted_count ?? 0}/{displayRequest.required_helpers}명 확정 ·{' '}
+              {displayRequest.applied_count ?? 0}명 신청
             </dd>
           </div>
           <div>
             <dt>안전 등급</dt>
-            <dd>{safetyTierLabel(request.safety_tier)}</dd>
+            <dd>{safetyTierLabel(displayRequest.safety_tier)}</dd>
           </div>
           <div>
             <dt>준비물 구비</dt>
-            <dd>{formatBoolean(request.items_provided)}</dd>
+            <dd>{formatBoolean(displayRequest.items_provided)}</dd>
           </div>
           <div>
             <dt>준비물 메모</dt>
-            <dd>{request.items_needed_details ?? '-'}</dd>
+            <dd>{displayRequest.items_needed_details ?? '-'}</dd>
           </div>
         </dl>
 
@@ -2768,18 +2966,18 @@ function RequestDetailModal({
               <div>
                 <p className="eyebrow">신청 상태</p>
                 <strong>{helperCta.message}</strong>
-                {request.application_deadline ? (
+                {displayRequest.application_deadline ? (
                   <p className="muted">
-                    신청 마감: {formatDateTime(request.application_deadline)}
+                    신청 마감: {formatDateTime(displayRequest.application_deadline)}
                   </p>
                 ) : null}
               </div>
               <button
                 type="button"
-                onClick={onApply}
-                disabled={!helperCta.canApply || working}
+                onClick={() => void handleApplyFromDetail()}
+                disabled={!helperCta.canApply || working || applying || loadingDetail}
               >
-                {working ? '처리 중...' : helperCta.label}
+                {working || applying ? '처리 중...' : helperCta.label}
               </button>
             </div>
           </>
@@ -2787,10 +2985,10 @@ function RequestDetailModal({
 
         {audience === 'admin' ? (
           <>
-            {request.admin_notes ? (
+            {displayRequest.admin_notes ? (
               <section className="detail-section">
                 <h4>운영자 메모</h4>
-                <p>{request.admin_notes}</p>
+                <p>{displayRequest.admin_notes}</p>
               </section>
             ) : null}
 
@@ -3299,7 +3497,7 @@ function RequestCard({
             <dd>{request.location_public ?? requester?.address_public ?? '-'}</dd>
           </div>
           <div>
-            <dt>희망 시간</dt>
+            <dt>확정 시간</dt>
             <dd>{appointment}</dd>
           </div>
           <div>
@@ -3649,6 +3847,13 @@ function adminCallTaskStatusLabel(status: AdminCallTaskStatus) {
 function helperRequestCta(request: HelpRequestWithRequester) {
   const assignmentStatus = request.current_helper_assignment_status;
 
+  if (request.can_apply === false && request.apply_block_reason) {
+    const blocked = helperApplyBlockReason(request.apply_block_reason);
+    if (blocked) {
+      return blocked;
+    }
+  }
+
   if (assignmentStatus) {
     return {
       label: assignmentStatus === 'applied' ? '신청 완료 · 수락 대기 중' : assignmentStatusLabel(assignmentStatus),
@@ -3681,6 +3886,36 @@ function helperRequestCta(request: HelpRequestWithRequester) {
     message: '활동 시간을 확인한 뒤 참여 신청할 수 있습니다.',
     canApply: true,
   };
+}
+
+function helperApplyBlockReason(reason: string) {
+  const reasons: Record<
+    string,
+    { label: string; message: string; canApply: false }
+  > = {
+    already_applied: {
+      label: '신청 완료 · 수락 대기 중',
+      message: '신청 완료! 운영자 확인 후 매칭이 확정돼요.',
+      canApply: false,
+    },
+    full: {
+      label: '모집 마감',
+      message: '정원이 충족되어 더 이상 신청할 수 없어요.',
+      canApply: false,
+    },
+    deadline_passed: {
+      label: '신청 마감',
+      message: '이 요청은 신청 가능한 시간이 지났어요.',
+      canApply: false,
+    },
+    not_helper: {
+      label: '신청 불가',
+      message: '청년 도움자 계정만 신청할 수 있어요.',
+      canApply: false,
+    },
+  };
+
+  return reasons[reason] ?? null;
 }
 
 function adminReviewErrorMessage(message: string) {
@@ -3780,6 +4015,10 @@ function nullableNumber(value: string) {
 
   const nextValue = Number(trimmed);
   return Number.isFinite(nextValue) ? nextValue : null;
+}
+
+function formatCoordinate(value: number) {
+  return value.toFixed(6);
 }
 
 function buildConsentDocumentPath(phone: string, fileName: string) {
@@ -3906,6 +4145,59 @@ function mapPublishedRequest(
     application_deadline: row.application_deadline,
     applications_locked: row.applications_locked,
     is_full: row.is_full,
+  };
+}
+
+function mapHelpRequestDetail(row: HelpRequestDetailRow): HelpRequestWithRequester {
+  return {
+    id: row.id,
+    requester_id: row.requester_id,
+    approved_by: null,
+    source: row.source,
+    status: row.status,
+    category: row.category,
+    title: row.title,
+    content: row.content,
+    items_provided: row.items_provided,
+    items_needed_details: row.items_needed_details,
+    appointment_time: row.appointment_time,
+    appointment_timezone: row.appointment_timezone,
+    location_public: row.location_public,
+    location_detail: row.location_detail,
+    location_latitude: row.location_latitude,
+    location_longitude: row.location_longitude,
+    credit_reward: row.credit_reward,
+    required_helpers: row.required_helpers,
+    safety_tier: row.safety_tier,
+    reject_reason: null,
+    rejected_at: null,
+    estimated_duration_minutes: row.estimated_duration_minutes,
+    ai_extracted_payload: null,
+    admin_notes: null,
+    created_at: row.created_at,
+    updated_at: row.created_at,
+    approved_at: null,
+    published_at: row.published_at,
+    requester: {
+      id: row.requester_id,
+      name: row.requester_name,
+      phone: row.requester_phone,
+      village: row.requester_village,
+      address_public: row.requester_address_public,
+      address_detail: row.requester_address_detail,
+      personal_notes: row.requester_personal_notes,
+    },
+    distance_meters: row.distance_meters,
+    is_new: row.is_new,
+    applied_count: row.applied_count,
+    accepted_count: row.accepted_count,
+    current_helper_assignment_id: row.current_helper_assignment_id,
+    current_helper_assignment_status: row.current_helper_assignment_status,
+    application_deadline: row.application_deadline,
+    applications_locked: row.applications_locked,
+    is_full: row.is_full,
+    can_apply: row.can_apply,
+    apply_block_reason: row.apply_block_reason,
   };
 }
 

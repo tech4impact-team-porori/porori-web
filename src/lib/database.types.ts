@@ -704,6 +704,55 @@ export type Database = {
           must_fail_at_deadline: boolean;
         }[];
       };
+      get_help_request_detail: {
+        Args: {
+          p_help_request_id: string;
+          p_latitude?: number | null;
+          p_longitude?: number | null;
+        };
+        Returns: {
+          id: string;
+          requester_id: string;
+          source: Database['public']['Enums']['request_source'];
+          status: Database['public']['Enums']['help_request_status'];
+          category: Database['public']['Enums']['help_category'];
+          title: string;
+          content: string;
+          items_provided: boolean | null;
+          items_needed_details: string | null;
+          appointment_time: string | null;
+          appointment_timezone: string;
+          location_public: string | null;
+          location_detail: string | null;
+          credit_reward: number;
+          required_helpers: number;
+          safety_tier: Database['public']['Enums']['safety_tier'];
+          location_latitude: number | null;
+          location_longitude: number | null;
+          estimated_duration_minutes: number;
+          created_at: string;
+          published_at: string | null;
+          requester_name: string;
+          requester_phone: string | null;
+          requester_village: string;
+          requester_address_public: string | null;
+          requester_address_detail: string | null;
+          requester_personal_notes: string | null;
+          distance_meters: number | null;
+          is_new: boolean;
+          applied_count: number;
+          accepted_count: number;
+          current_helper_assignment_id: string | null;
+          current_helper_assignment_status:
+            | Database['public']['Enums']['assignment_status']
+            | null;
+          application_deadline: string | null;
+          applications_locked: boolean;
+          is_full: boolean;
+          can_apply: boolean;
+          apply_block_reason: string | null;
+        }[];
+      };
       refresh_matching_operational_alerts: {
         Args: Record<PropertyKey, never>;
         Returns: number;
