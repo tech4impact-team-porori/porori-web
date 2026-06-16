@@ -31,6 +31,21 @@ type HelpRequestDetailRow =
 type RegisteredRequesterRow =
   Database['public']['Functions']['list_admin_requester_profiles']['Returns'][number];
 
+type HelpRequestTimeOption = {
+  id: string;
+  label: string;
+  starts_at: string;
+  timezone: string;
+  status: Database['public']['Enums']['help_request_time_option_status'];
+  locked_at: string | null;
+  applied_count: number;
+  accepted_count: number;
+  is_locked: boolean;
+  is_available: boolean;
+  current_helper_assignment_id?: string | null;
+  current_helper_assignment_status?: AssignmentRow['status'] | null;
+};
+
 type RequesterSummary = Pick<
   Profile,
   'id' | 'name' | 'phone' | 'village' | 'address_public' | 'address_detail'
@@ -50,11 +65,15 @@ type HelpRequestWithRequester = HelpRequestRow & {
   accepted_count?: number;
   current_helper_assignment_id?: string | null;
   current_helper_assignment_status?: AssignmentRow['status'] | null;
+  current_helper_time_option_id?: string | null;
+  locked_time_option_id?: string | null;
+  time_options?: HelpRequestTimeOption[];
   application_deadline?: string | null;
   applications_locked?: boolean;
   is_full?: boolean;
   can_apply?: boolean;
   apply_block_reason?: string | null;
+  application_state?: string | null;
 };
 
 type AssignmentWithRequest = AssignmentRow & {
@@ -2162,12 +2181,13 @@ function HelperFeed({
     void loadPublishedRequests(false);
   }, [loadPublishedRequests]);
 
-  async function acceptRequest(id: string) {
+  async function acceptRequest(id: string, timeOptionId?: string | null) {
     setWorkingId(id);
     setError(null);
 
     const { error: rpcError } = await supabase.rpc('apply_help_request', {
       p_help_request_id: id,
+      p_time_option_id: timeOptionId ?? null,
     });
 
     if (rpcError) {
@@ -2180,13 +2200,18 @@ function HelperFeed({
     setWorkingId(null);
   }
 
-  async function acceptSelectedRequest(request: HelpRequestWithRequester) {
-    await acceptRequest(request.id);
+  async function acceptSelectedRequest(
+    request: HelpRequestWithRequester,
+    timeOptionId?: string | null,
+  ) {
+    await acceptRequest(request.id, timeOptionId);
     setSelectedRequest((current) =>
       current?.id === request.id
         ? {
             ...current,
             current_helper_assignment_status: 'applied',
+            current_helper_time_option_id: timeOptionId ?? current.current_helper_time_option_id,
+            application_state: 'pending',
           }
         : current,
     );
@@ -2320,7 +2345,7 @@ function HelperFeed({
           audience="helper"
           request={selectedRequest}
           working={workingId === selectedRequest.id}
-          onApply={() => void acceptSelectedRequest(selectedRequest)}
+          onApply={(timeOptionId) => void acceptSelectedRequest(selectedRequest, timeOptionId)}
           onClose={() => setSelectedRequest(null)}
         />
       ) : null}
@@ -2477,6 +2502,26 @@ function HelperAssignments({
     setWorkingId(null);
   }
 
+  async function moveApplication(assignmentId: string) {
+    setWorkingId(assignmentId);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc(
+      'move_help_application_to_locked_option',
+      {
+        p_assignment_id: assignmentId,
+      },
+    );
+
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
+      await loadAssignments();
+    }
+
+    setWorkingId(null);
+  }
+
   return (
     <section className="panel">
       <div className="section-header">
@@ -2502,6 +2547,7 @@ function HelperAssignments({
             assignment={assignment}
             busy={workingId === assignment.id}
             onCancel={() => void cancelApplication(assignment.id)}
+            onMove={() => void moveApplication(assignment.id)}
             onViewDetails={() => setSelectedAssignment(assignment)}
           />
         ))}
@@ -3106,7 +3152,7 @@ function RequestDetailModal({
   audience: 'admin' | 'helper';
   request: HelpRequestWithRequester;
   working?: boolean;
-  onApply?: () => void | Promise<void>;
+  onApply?: (timeOptionId?: string | null) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [detailRequest, setDetailRequest] =
@@ -3119,7 +3165,16 @@ function RequestDetailModal({
   const [loadingVoice, setLoadingVoice] = useState(audience === 'admin');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [pendingApplyOption, setPendingApplyOption] =
+    useState<HelpRequestTimeOption | null>(null);
   const helperCta = helperRequestCta(displayRequest);
+  const timeOptions = displayRequest.time_options ?? [];
+  const selectedAppliedOption = timeOptions.find(
+    (option) => option.id === displayRequest.current_helper_time_option_id,
+  );
+  const lockedOption = timeOptions.find(
+    (option) => option.id === displayRequest.locked_time_option_id,
+  );
 
   const loadDetail = useCallback(async () => {
     if (audience !== 'helper') {
@@ -3154,17 +3209,30 @@ function RequestDetailModal({
     void loadDetail();
   }, [loadDetail]);
 
-  async function handleApplyFromDetail() {
+  useEffect(() => {
+    if (audience !== 'helper') {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadDetail();
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [audience, loadDetail]);
+
+  async function handleApplyFromDetail(timeOptionId?: string | null) {
     if (!onApply || !helperCta.canApply) {
       return;
     }
 
     setApplying(true);
     try {
-      await onApply();
+      await onApply(timeOptionId);
       await loadDetail();
     } finally {
       setApplying(false);
+      setPendingApplyOption(null);
     }
   }
 
@@ -3293,23 +3361,115 @@ function RequestDetailModal({
               </p>
             </div>
 
+            {timeOptions.length > 0 ? (
+              <section className="detail-section">
+                <div className="section-header compact">
+                  <div>
+                    <p className="eyebrow">활동 시간 선택</p>
+                    <h4>가능한 시간대</h4>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void loadDetail()}
+                    disabled={loadingDetail}
+                  >
+                    현황 새로고침
+                  </button>
+                </div>
+                <div className="time-option-grid">
+                  {timeOptions.map((option) => {
+                    const isMine =
+                      option.id === displayRequest.current_helper_time_option_id;
+                    const isLocked = option.status === 'locked';
+                    const isClosed = option.status === 'closed';
+                    const canPick =
+                      helperCta.canApply &&
+                      option.is_available &&
+                      !isClosed &&
+                      (!displayRequest.locked_time_option_id || isLocked);
+
+                    return (
+                      <article
+                        key={option.id}
+                        className={[
+                          'time-option-card',
+                          isMine ? 'selected' : '',
+                          isLocked ? 'locked' : '',
+                          isClosed ? 'closed' : '',
+                        ].filter(Boolean).join(' ')}
+                      >
+                        <div>
+                          <span className="status-badge">
+                            {isLocked ? '확정 시간' : isClosed ? '마감' : '신청 가능'}
+                          </span>
+                          <h5>{option.label}</h5>
+                          <p>{formatDateTime(option.starts_at)}</p>
+                        </div>
+                        <dl className="mini-meta-grid">
+                          <div>
+                            <dt>신청</dt>
+                            <dd>{option.applied_count}/6명</dd>
+                          </div>
+                          <div>
+                            <dt>확정</dt>
+                            <dd>{option.accepted_count}명</dd>
+                          </div>
+                        </dl>
+                        {isMine ? (
+                          <p className="hint">내가 신청한 시간대입니다.</p>
+                        ) : null}
+                        {canPick ? (
+                          <button
+                            type="button"
+                            onClick={() => setPendingApplyOption(option)}
+                            disabled={working || applying || loadingDetail}
+                          >
+                            이 시간에 신청
+                          </button>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+
             <div className="detail-cta-bar">
               <div>
                 <p className="eyebrow">신청 상태</p>
                 <strong>{helperCta.message}</strong>
+                {displayRequest.application_state === 'locked_my_time' && lockedOption ? (
+                  <p className="hint">
+                    {formatDateTime(lockedOption.starts_at)} 시간대로 진행 준비 중입니다.
+                  </p>
+                ) : null}
+                {displayRequest.application_state === 'move_needed' && lockedOption ? (
+                  <p className="error-message">
+                    다른 시간대가 먼저 확정됐어요. 내 약속에서 확정 시간대로 옮기거나
+                    무페널티로 신청을 취소할 수 있습니다.
+                  </p>
+                ) : null}
+                {selectedAppliedOption ? (
+                  <p className="hint">
+                    내 신청 시간: {formatDateTime(selectedAppliedOption.starts_at)}
+                  </p>
+                ) : null}
                 {displayRequest.application_deadline ? (
                   <p className="muted">
                     신청 마감: {formatDateTime(displayRequest.application_deadline)}
                   </p>
                 ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => void handleApplyFromDetail()}
-                disabled={!helperCta.canApply || working || applying || loadingDetail}
-              >
-                {working || applying ? '처리 중...' : helperCta.label}
-              </button>
+              {timeOptions.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void handleApplyFromDetail(null)}
+                  disabled={!helperCta.canApply || working || applying || loadingDetail}
+                >
+                  {working || applying ? '처리 중...' : helperCta.label}
+                </button>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -3372,6 +3532,38 @@ function RequestDetailModal({
           </>
         ) : null}
       </div>
+      {audience === 'helper' && pendingApplyOption ? (
+        <Modal
+          title="신청 확인"
+          onClose={() => setPendingApplyOption(null)}
+        >
+          <div className="detail-stack">
+            <p className="eyebrow">확정 시간 확인</p>
+            <h3>{formatDateTime(pendingApplyOption.starts_at)}</h3>
+            <p>
+              이 시간에 참여 신청할까요? 신청 후에는 수락 대기 상태가 되며,
+              약속 확정 전까지 무페널티로 취소할 수 있습니다.
+            </p>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setPendingApplyOption(null)}
+                disabled={applying}
+              >
+                취소하기
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleApplyFromDetail(pendingApplyOption.id)}
+                disabled={applying || working}
+              >
+                {applying ? '처리 중...' : '신청하기'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </Modal>
   );
 }
@@ -3776,6 +3968,11 @@ function RequestCard({
     [request.appointment_time],
   );
   const applicationStatus = request.current_helper_assignment_status;
+  const primaryStatusLabel = applicationStatus
+    ? assignmentStatusLabel(applicationStatus)
+    : request.is_full
+      ? '마감'
+      : statusLabel(request.status);
 
   return (
     <article className="request-card">
@@ -3785,7 +3982,9 @@ function RequestCard({
             <span className={`category-badge category-${request.category}`}>
               {categoryLabel(request.category)}
             </span>
-            <span className="status-badge">{statusLabel(request.status)}</span>
+            <span className={request.is_full && !applicationStatus ? 'status-badge closed' : 'status-badge'}>
+              {primaryStatusLabel}
+            </span>
             {request.is_new ? <span className="new-badge">NEW</span> : null}
             {request.distance_meters !== undefined &&
             request.distance_meters !== null ? (
@@ -3793,10 +3992,6 @@ function RequestCard({
                 {formatDistance(request.distance_meters)}
               </span>
             ) : null}
-            {applicationStatus ? (
-              <span className="status-badge">{assignmentStatusLabel(applicationStatus)}</span>
-            ) : null}
-            {request.is_full ? <span className="status-badge closed">마감</span> : null}
           </div>
           <h3>{request.title}</h3>
           {compactPrivateFields ? (
@@ -3867,11 +4062,13 @@ function HelperAssignmentCard({
   assignment,
   busy,
   onCancel,
+  onMove,
   onViewDetails,
 }: {
   assignment: AssignmentWithRequest;
   busy: boolean;
   onCancel: () => void;
+  onMove: () => void;
   onViewDetails: () => void;
 }) {
   const request = normalizeOne(assignment.help_request);
@@ -3880,13 +4077,32 @@ function HelperAssignmentCard({
   const creditedAmount = assignmentCreditAmount(assignment);
   const canViewPrivateLocation = assignment.status !== 'applied';
   const canOpenDetails = assignment.status !== 'applied';
+  const timeOptions = request?.time_options ?? [];
+  const selectedOption = timeOptions.find(
+    (option) => option.id === assignment.time_option_id,
+  );
+  const lockedOption = timeOptions.find(
+    (option) => option.id === request?.locked_time_option_id,
+  );
+  const applicationState = request?.application_state;
 
   return (
     <article className="request-card">
       <div>
-        <span className="status-badge">{assignmentStatusLabel(assignment.status)}</span>
+        <span className="status-badge">
+          {helperAssignmentDisplayStatus(assignment, applicationState)}
+        </span>
         <h3>{request?.title ?? '제목 없는 요청'}</h3>
         <p>{request?.content ?? '요청 상세가 없습니다.'}</p>
+        {assignment.status === 'applied' ? (
+          <p className={applicationState === 'move_needed' ? 'error-message' : 'hint'}>
+            {applicationState === 'move_needed' && lockedOption
+              ? `다른 시간대가 먼저 확정됐어요. ${formatDateTime(lockedOption.starts_at)}로 옮기거나 무페널티로 취소하세요.`
+              : applicationState === 'locked_my_time' && lockedOption
+                ? `${formatDateTime(lockedOption.starts_at)} 시간대로 진행 준비 중입니다.`
+                : '약속 확정을 위해 운영자 검토 중이에요. 약속 확정 전까지 무페널티로 취소할 수 있습니다.'}
+          </p>
+        ) : null}
       </div>
       <dl className="meta-grid">
         <div>
@@ -3895,7 +4111,14 @@ function HelperAssignmentCard({
         </div>
         <div>
           <dt>방문 시간</dt>
-          <dd>{formatDateTime(request?.appointment_time ?? null)}</dd>
+          <dd>
+            {formatDateTime(
+              selectedOption?.starts_at ??
+                lockedOption?.starts_at ??
+                request?.appointment_time ??
+                null,
+            )}
+          </dd>
         </div>
         <div>
           <dt>방문 장소</dt>
@@ -3923,8 +4146,13 @@ function HelperAssignmentCard({
 
       {assignment.status === 'applied' ? (
         <div className="button-row">
+          {applicationState === 'move_needed' ? (
+            <button type="button" onClick={onMove} disabled={busy}>
+              확정 시간대로 옮기기
+            </button>
+          ) : null}
           <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
-            신청 취소
+            신청 취소 · 무페널티
           </button>
         </div>
       ) : null}
@@ -4177,6 +4405,25 @@ function assignmentStatusLabel(status: AssignmentRow['status']) {
   return labels[status];
 }
 
+function helperAssignmentDisplayStatus(
+  assignment: AssignmentWithRequest,
+  applicationState?: string | null,
+) {
+  if (assignment.status !== 'applied') {
+    return assignmentStatusLabel(assignment.status);
+  }
+
+  if (applicationState === 'locked_my_time') {
+    return '내 시간대 확정 진행';
+  }
+
+  if (applicationState === 'move_needed') {
+    return '이동 안내';
+  }
+
+  return '수락 대기';
+}
+
 function adminCallTaskStatusLabel(status: AdminCallTaskStatus) {
   const labels: Record<AdminCallTaskStatus, string> = {
     pending: '전화 대기',
@@ -4197,6 +4444,22 @@ function helperRequestCta(request: HelpRequestWithRequester) {
   }
 
   if (assignmentStatus) {
+    if (assignmentStatus === 'applied' && request.application_state === 'locked_my_time') {
+      return {
+        label: '내 시간대 확정 진행',
+        message: '내가 신청한 시간대가 먼저 모였어요. 운영자 최종 승인을 기다리고 있습니다.',
+        canApply: false,
+      };
+    }
+
+    if (assignmentStatus === 'applied' && request.application_state === 'move_needed') {
+      return {
+        label: '이동 안내',
+        message: '다른 시간대가 먼저 확정됐어요. 내 약속에서 옮기거나 취소할 수 있습니다.',
+        canApply: false,
+      };
+    }
+
     return {
       label: assignmentStatus === 'applied' ? '신청 완료 · 수락 대기 중' : assignmentStatusLabel(assignmentStatus),
       message:
@@ -4543,11 +4806,15 @@ function mapHelpRequestDetail(row: HelpRequestDetailRow): HelpRequestWithRequest
     accepted_count: row.accepted_count,
     current_helper_assignment_id: row.current_helper_assignment_id,
     current_helper_assignment_status: row.current_helper_assignment_status,
+    current_helper_time_option_id: row.current_helper_time_option_id,
+    locked_time_option_id: row.locked_time_option_id,
+    time_options: normalizeTimeOptions(row.time_options),
     application_deadline: row.application_deadline,
     applications_locked: row.applications_locked,
     is_full: row.is_full,
     can_apply: row.can_apply,
     apply_block_reason: row.apply_block_reason,
+    application_state: row.application_state,
   };
 }
 
@@ -4570,11 +4837,66 @@ function mapHelperAssignment(row: HelperAssignmentRpcRow): AssignmentWithRequest
     help_request: {
       ...helpRequest,
       requester,
+      time_options: normalizeTimeOptions((helpRequest as HelpRequestWithRequester).time_options),
+      locked_time_option_id: (helpRequest as HelpRequestWithRequester).locked_time_option_id,
+      application_state: (helpRequest as HelpRequestWithRequester).application_state,
     },
     companion_helpers: companionHelpers,
     completion_proofs: completionProofs,
     credit_ledger: creditLedger,
   };
+}
+
+function normalizeTimeOptions(value: unknown): HelpRequestTimeOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const option = item as Record<string, unknown>;
+      if (
+        typeof option.id !== 'string' ||
+        typeof option.label !== 'string' ||
+        typeof option.starts_at !== 'string'
+      ) {
+        return null;
+      }
+
+      const normalized: HelpRequestTimeOption = {
+        id: option.id,
+        label: option.label,
+        starts_at: option.starts_at,
+        timezone:
+          typeof option.timezone === 'string' ? option.timezone : 'Asia/Seoul',
+        status:
+          option.status === 'locked' || option.status === 'closed'
+            ? option.status
+            : 'open',
+        locked_at: typeof option.locked_at === 'string' ? option.locked_at : null,
+        applied_count:
+          typeof option.applied_count === 'number' ? option.applied_count : 0,
+        accepted_count:
+          typeof option.accepted_count === 'number' ? option.accepted_count : 0,
+        is_locked: option.is_locked === true,
+        is_available: option.is_available !== false,
+        current_helper_assignment_id:
+          typeof option.current_helper_assignment_id === 'string'
+            ? option.current_helper_assignment_id
+            : null,
+        current_helper_assignment_status:
+          typeof option.current_helper_assignment_status === 'string'
+            ? (option.current_helper_assignment_status as AssignmentRow['status'])
+            : null,
+      };
+
+      return normalized;
+    })
+    .filter((option): option is HelpRequestTimeOption => option !== null);
 }
 
 function assignmentCreditAmount(assignment: AssignmentWithRequest) {

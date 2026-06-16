@@ -1526,6 +1526,69 @@ button.danger,
   margin: 4px 0 0;
 }
 
+.section-header.compact {
+  margin-bottom: 10px;
+}
+
+.time-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.time-option-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  padding: 13px;
+}
+
+.time-option-card.selected {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.time-option-card.locked {
+  background: var(--soft-2);
+}
+
+.time-option-card.closed {
+  opacity: 0.65;
+}
+
+.time-option-card h5,
+.time-option-card p {
+  margin: 6px 0 0;
+}
+
+.mini-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.mini-meta-grid div {
+  border-radius: 10px;
+  background: var(--soft-3);
+  padding: 8px;
+}
+
+.mini-meta-grid dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.mini-meta-grid dd {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-weight: 900;
+}
+
 .completion-form {
   display: grid;
   gap: 12px;

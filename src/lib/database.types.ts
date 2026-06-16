@@ -50,6 +50,7 @@ export type Database = {
       call_direction: 'inbound' | 'outbound';
       call_purpose: 'intake' | 'match_confirmation' | 'happy_call';
       admin_call_task_status: 'pending' | 'completed';
+      help_request_time_option_status: 'open' | 'locked' | 'closed';
       notification_channel:
         | 'kakao'
         | 'sms'
@@ -188,6 +189,7 @@ export type Database = {
           id: string;
           help_request_id: string;
           helper_id: string;
+          time_option_id: string | null;
           status: Database['public']['Enums']['assignment_status'];
           applied_at: string;
           accepted_at: string | null;
@@ -200,6 +202,7 @@ export type Database = {
           id?: string;
           help_request_id: string;
           helper_id: string;
+          time_option_id?: string | null;
           status?: Database['public']['Enums']['assignment_status'];
           applied_at?: string;
           accepted_at?: string | null;
@@ -254,6 +257,42 @@ export type Database = {
             columns: ['assignment_id'];
             isOneToOne: false;
             referencedRelation: 'assignments';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      help_request_time_options: {
+        Row: {
+          id: string;
+          help_request_id: string;
+          label: string;
+          starts_at: string;
+          timezone: string;
+          status: Database['public']['Enums']['help_request_time_option_status'];
+          locked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          help_request_id: string;
+          label: string;
+          starts_at: string;
+          timezone?: string;
+          status?: Database['public']['Enums']['help_request_time_option_status'];
+          locked_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<
+          Database['public']['Tables']['help_request_time_options']['Insert']
+        >;
+        Relationships: [
+          {
+            foreignKeyName: 'help_request_time_options_help_request_id_fkey';
+            columns: ['help_request_id'];
+            isOneToOne: false;
+            referencedRelation: 'help_requests';
             referencedColumns: ['id'];
           },
         ];
@@ -540,6 +579,7 @@ export type Database = {
       apply_help_request: {
         Args: {
           p_help_request_id: string;
+          p_time_option_id?: string | null;
         };
         Returns: string;
       };
@@ -556,6 +596,12 @@ export type Database = {
         Returns: number;
       };
       cancel_help_application: {
+        Args: {
+          p_assignment_id: string;
+        };
+        Returns: string;
+      };
+      move_help_application_to_locked_option: {
         Args: {
           p_assignment_id: string;
         };
@@ -766,11 +812,15 @@ export type Database = {
           current_helper_assignment_status:
             | Database['public']['Enums']['assignment_status']
             | null;
+          current_helper_time_option_id: string | null;
+          locked_time_option_id: string | null;
+          time_options: Json;
           application_deadline: string | null;
           applications_locked: boolean;
           is_full: boolean;
           can_apply: boolean;
           apply_block_reason: string | null;
+          application_state: string;
         }[];
       };
       refresh_matching_operational_alerts: {
