@@ -21,6 +21,7 @@ type SafetyTier = Database['public']['Enums']['safety_tier'];
 type AdminCallTaskStatus =
   Database['public']['Enums']['admin_call_task_status'];
 type AdminTabId = 'requesters' | 'approval' | 'calls' | 'notifications';
+type HelperTabId = 'home' | 'appointments' | 'mypage';
 type PublishedHelpRequestRow =
   Database['public']['Functions']['list_published_help_requests']['Returns'][number];
 type HelperAssignmentRpcRow =
@@ -481,15 +482,17 @@ function AppShell({
   onToggleTheme: () => void;
   children: React.ReactNode;
 }) {
+  const isAdmin = adminRoles.has(profile.role);
+
   return (
-    <div className="app-shell">
+    <div className={isAdmin ? 'app-shell admin-app-shell' : 'app-shell helper-app-shell'}>
       <header className="topbar">
         <div className="topbar-brand">
           <ThemeToggle theme={theme} onToggleTheme={onToggleTheme} />
           <div>
             <img className="brand-mark" src={wordmarkImage} alt="DOUM" />
             <p className="eyebrow">
-              {adminRoles.has(profile.role) ? '운영자 콘솔' : '청년 도움 앱'}
+              {isAdmin ? '운영자 콘솔' : '청년 도움 앱'}
             </p>
           </div>
         </div>
@@ -1919,6 +1922,7 @@ function AdminCompletionQueue({ onReviewed }: { onReviewed: () => void }) {
 
 function HelperDashboard({ profile }: { profile: Profile }) {
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<HelperTabId>('home');
   const [creditCelebration, setCreditCelebration] =
     useState<CreditCelebration | null>(null);
   const displayName = shortDisplayName(profile.name);
@@ -1928,31 +1932,44 @@ function HelperDashboard({ profile }: { profile: Profile }) {
   }, []);
 
   return (
-    <div className="dashboard-grid helper-dashboard">
-      <section className="hero-panel helper-hero">
-        <div className="helper-hero-copy">
-          <p className="eyebrow">다로리 도움</p>
-          <h1>{displayName}님, 오늘도 도울 이웃을 찾아보세요</h1>
-        </div>
-        <CreditSummaryPanel
-          profile={profile}
-          refreshKey={activityRefreshKey}
-          variant="hero"
-        />
-      </section>
-      <HelperFeed
-        profile={profile}
-        onAccepted={() => setActivityRefreshKey((current) => current + 1)}
-      />
-      <HelperAssignments
-        profile={profile}
-        onCreditEarned={handleCreditEarned}
-      />
-      <ActivityPanel
-        audience="helper"
-        profile={profile}
-        refreshKey={activityRefreshKey}
-      />
+    <div className="dashboard-grid helper-dashboard helper-phone-screen">
+      <div className="helper-screen-content">
+        {activeTab === 'home' ? (
+          <>
+            <section className="helper-greeting">
+              <div>
+                <p className="eyebrow">다로리 도움</p>
+                <h1>{displayName}님, 오늘도 도울 이웃을 찾아보세요</h1>
+                <p>근처 어르신의 작은 요청을 확인하고 가능한 도움을 신청하세요.</p>
+              </div>
+              <CreditSummaryPanel
+                profile={profile}
+                refreshKey={activityRefreshKey}
+                variant="hero"
+              />
+            </section>
+            <HelperFeed
+              profile={profile}
+              onAccepted={() => setActivityRefreshKey((current) => current + 1)}
+            />
+          </>
+        ) : null}
+
+        {activeTab === 'appointments' ? (
+          <HelperAssignments
+            profile={profile}
+            onCreditEarned={handleCreditEarned}
+          />
+        ) : null}
+
+        {activeTab === 'mypage' ? (
+          <HelperMyPage
+            profile={profile}
+            refreshKey={activityRefreshKey}
+          />
+        ) : null}
+      </div>
+      <HelperBottomNav activeTab={activeTab} onChange={setActiveTab} />
       {creditCelebration ? (
         <CreditEarnedModal
           celebration={creditCelebration}
@@ -1960,6 +1977,75 @@ function HelperDashboard({ profile }: { profile: Profile }) {
         />
       ) : null}
     </div>
+  );
+}
+
+function HelperBottomNav({
+  activeTab,
+  onChange,
+}: {
+  activeTab: HelperTabId;
+  onChange: (tab: HelperTabId) => void;
+}) {
+  const navItems: Array<{
+    id: HelperTabId;
+    label: string;
+    icon: string;
+  }> = [
+    { id: 'home', label: '홈', icon: '⌂' },
+    { id: 'appointments', label: '내 약속', icon: '◷' },
+    { id: 'mypage', label: '마이페이지', icon: '○' },
+  ];
+
+  return (
+    <nav className="helper-bottom-nav" aria-label="청년 메뉴">
+      {navItems.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={activeTab === item.id ? 'active' : ''}
+          aria-current={activeTab === item.id ? 'page' : undefined}
+          onClick={() => onChange(item.id)}
+        >
+          <span className="helper-nav-icon" aria-hidden="true">
+            {item.icon}
+          </span>
+          <span>{item.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function HelperMyPage({
+  profile,
+  refreshKey,
+}: {
+  profile: Profile;
+  refreshKey: number;
+}) {
+  return (
+    <section className="helper-mypage-stack">
+      <section className="helper-profile-card">
+        <div className="helper-avatar" aria-hidden="true">
+          {shortDisplayName(profile.name).slice(0, 1)}
+        </div>
+        <div>
+          <p className="eyebrow">마이페이지</p>
+          <h1>{profile.name}</h1>
+          <p>{profile.village ?? '다로리'} · {profile.address_public ?? '주소 미등록'}</p>
+        </div>
+      </section>
+      <CreditSummaryPanel
+        profile={profile}
+        refreshKey={refreshKey}
+      />
+      <ActivityPanel
+        audience="helper"
+        profile={profile}
+        refreshKey={refreshKey}
+      />
+    </section>
   );
 }
 
