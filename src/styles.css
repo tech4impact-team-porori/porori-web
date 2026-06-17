@@ -842,7 +842,7 @@ button.admin-tab.active .tab-count-badge {
 .helper-bottom-nav button {
   display: grid;
   justify-items: center;
-  gap: 3px;
+  gap: 5px;
   min-height: 54px;
   border: 0;
   border-radius: 16px;
@@ -868,10 +868,10 @@ button.admin-tab.active .tab-count-badge {
 .helper-nav-icon {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   color: currentColor;
-  font-size: 1rem;
+  font-size: 1.35rem;
   line-height: 1;
 }
 

@@ -39,7 +39,8 @@ export type Database = {
         | 'confirmed'
         | 'rejected'
         | 'cancelled'
-        | 'disputed';
+        | 'disputed'
+        | 'no_show';
       completion_proof_status: 'submitted' | 'approved' | 'rejected';
       review_source: 'happy_call' | 'admin_manual' | 'app';
       credit_reason:
@@ -601,9 +602,34 @@ export type Database = {
         };
         Returns: string;
       };
+      list_unsubmitted_completion_candidates: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          assignment_id: string;
+          help_request_id: string;
+          helper_id: string;
+          helper_name: string;
+          helper_phone: string | null;
+          requester_id: string;
+          requester_name: string;
+          requester_phone: string | null;
+          request_title: string;
+          appointment_time: string | null;
+          appointment_timezone: string;
+          hours_overdue: number | null;
+        }[];
+      };
       move_help_application_to_locked_option: {
         Args: {
           p_assignment_id: string;
+        };
+        Returns: string;
+      };
+      resolve_unsubmitted_completion: {
+        Args: {
+          p_assignment_id: string;
+          p_elder_confirmed_visit: boolean;
+          p_admin_notes?: string | null;
         };
         Returns: string;
       };

@@ -30,6 +30,8 @@ type HelpRequestDetailRow =
   Database['public']['Functions']['get_help_request_detail']['Returns'][number];
 type RegisteredRequesterRow =
   Database['public']['Functions']['list_admin_requester_profiles']['Returns'][number];
+type UnsubmittedCompletionCandidateRow =
+  Database['public']['Functions']['list_unsubmitted_completion_candidates']['Returns'][number];
 
 type HelpRequestTimeOption = {
   id: string;
@@ -1935,6 +1937,149 @@ function AdminCompletionQueue({ onReviewed }: { onReviewed: () => void }) {
           onClose={() => setSelectedAssignment(null)}
         />
       ) : null}
+
+      <AdminMissingCompletionQueue onReviewed={onReviewed} />
+    </section>
+  );
+}
+
+function AdminMissingCompletionQueue({ onReviewed }: { onReviewed: () => void }) {
+  const [candidates, setCandidates] = useState<UnsubmittedCompletionCandidateRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [workingId, setWorkingId] = useState<string | null>(null);
+
+  const loadCandidates = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    const { data, error: candidateError } = await supabase.rpc(
+      'list_unsubmitted_completion_candidates',
+    );
+
+    if (candidateError) {
+      setError(candidateError.message);
+      setCandidates([]);
+    } else {
+      setCandidates(data ?? []);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadCandidates();
+  }, [loadCandidates]);
+
+  async function resolveCandidate(
+    candidate: UnsubmittedCompletionCandidateRow,
+    elderConfirmedVisit: boolean,
+  ) {
+    const defaultNote = elderConfirmedVisit
+      ? '어르신 전화 확인: 청년이 방문했다고 확인했습니다.'
+      : '어르신 전화 확인: 청년이 방문하지 않았다고 확인했습니다.';
+    const adminNotes = window.prompt('전화 확인 메모를 입력하세요.', defaultNote);
+
+    if (adminNotes === null) {
+      return;
+    }
+
+    setWorkingId(candidate.assignment_id);
+    setError(null);
+
+    const { error: rpcError } = await supabase.rpc(
+      'resolve_unsubmitted_completion',
+      {
+        p_assignment_id: candidate.assignment_id,
+        p_elder_confirmed_visit: elderConfirmedVisit,
+        p_admin_notes: adminNotes,
+      },
+    );
+
+    if (rpcError) {
+      setError(rpcError.message);
+    } else {
+      setCandidates((current) =>
+        current.filter((item) => item.assignment_id !== candidate.assignment_id),
+      );
+      onReviewed();
+    }
+
+    setWorkingId(null);
+  }
+
+  return (
+    <section className="detail-section">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">미인증 확인</p>
+          <h3>전화 확인 대상</h3>
+        </div>
+        <button type="button" onClick={() => void loadCandidates()} disabled={loading}>
+          새로고침
+        </button>
+      </div>
+
+      <p className="hint">
+        약속 시간이 지났지만 완료 인증이 없는 활동입니다. 어르신께 전화해 방문 여부를
+        확인한 뒤 처리하세요.
+      </p>
+      {error ? <p className="error-message">{error}</p> : null}
+      {loading ? <p className="muted">미인증 활동을 불러오는 중...</p> : null}
+      {!loading && candidates.length === 0 ? (
+        <p className="muted">전화 확인이 필요한 미인증 활동이 없습니다.</p>
+      ) : null}
+
+      <div className="request-list">
+        {candidates.map((candidate) => (
+          <article className="request-card" key={candidate.assignment_id}>
+            <div>
+              <span className="status-badge closed">미인증</span>
+              <h3>{candidate.request_title}</h3>
+              <p>
+                {candidate.helper_name}님 완료 인증 없음 ·{' '}
+                {candidate.hours_overdue ?? 0}시간 경과
+              </p>
+            </div>
+            <dl className="meta-grid">
+              <div>
+                <dt>방문 시간</dt>
+                <dd>{formatDateTime(candidate.appointment_time)}</dd>
+              </div>
+              <div>
+                <dt>청년 연락처</dt>
+                <dd>{candidate.helper_phone ?? '-'}</dd>
+              </div>
+              <div>
+                <dt>어르신</dt>
+                <dd>{candidate.requester_name}</dd>
+              </div>
+              <div>
+                <dt>어르신 연락처</dt>
+                <dd>{candidate.requester_phone ?? '-'}</dd>
+              </div>
+            </dl>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary"
+                disabled={workingId === candidate.assignment_id}
+                onClick={() => void resolveCandidate(candidate, true)}
+              >
+                왔다고 확인
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={workingId === candidate.assignment_id}
+                onClick={() => void resolveCandidate(candidate, false)}
+              >
+                안 왔다고 확인
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
@@ -2445,10 +2590,6 @@ function HelperAssignments({
     }
 
     const note = notes[assignment.id]?.trim() ?? '';
-    if (!note) {
-      setError('활동 후기를 입력한 뒤 제출하세요.');
-      return;
-    }
 
     setWorkingId(assignment.id);
     setError(null);
@@ -2471,7 +2612,7 @@ function HelperAssignments({
     const { error: rpcError } = await supabase.rpc('submit_completion', {
       p_assignment_id: assignment.id,
       p_image_path: imagePath,
-      p_note: note,
+      p_note: note || null,
     });
 
     if (rpcError) {
@@ -3667,10 +3808,11 @@ function AcceptedHelpDetailModal({
   const canSubmitCompletion =
     assignment.status === 'accepted' &&
     hasStarted &&
-    Boolean(file) &&
-    note.trim().length > 0;
+    Boolean(file);
   const companions = assignment.companion_helpers ?? [];
   const requesterPhone = requester?.phone?.trim() ?? '';
+  const expectedCredits = request?.credit_reward ?? 0;
+  const reviewBonusCredits = note.trim().length > 0 ? 1000 : 0;
 
   return (
     <Modal title="방문 준비" onClose={onClose}>
@@ -3776,13 +3918,23 @@ function AcceptedHelpDetailModal({
 
         {assignment.status === 'accepted' ? (
           <div className="completion-form">
-            {!hasStarted ? (
-              <p className="form-message">
-                방문 시간이 된 뒤 완료 인증을 제출할 수 있습니다.
-              </p>
-            ) : null}
+            <p className="form-message">
+              {hasStarted
+                ? '오늘 도움, 잘 끝나셨나요? 사진으로 인증해주세요.'
+                : '활동이 끝나면 인증해주세요. 방문 시간이 된 뒤 완료 인증을 제출할 수 있습니다.'}
+            </p>
+            <dl className="meta-grid">
+              <div>
+                <dt>적립 예상 크레딧</dt>
+                <dd>{formatCredits(expectedCredits + reviewBonusCredits)}</dd>
+              </div>
+              <div>
+                <dt>후기 보너스</dt>
+                <dd>작성 시 1,000 크레딧</dd>
+              </div>
+            </dl>
             <label>
-              완료 사진
+              완료 사진 <span className="required-marker">*필수</span>
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -3792,12 +3944,12 @@ function AcceptedHelpDetailModal({
               />
             </label>
             <label>
-              활동 후기
+              한 줄 후기 <span className="muted">(선택 · 작성 시 보너스)</span>
               <input
                 type="text"
                 value={note}
                 onChange={(event) => onNoteChange(event.target.value)}
-                placeholder="어르신과의 활동 후기를 남겨주세요"
+                placeholder="오늘 활동은 어땠나요?"
               />
             </label>
             <div className="button-row">
@@ -4400,6 +4552,7 @@ function assignmentStatusLabel(status: AssignmentRow['status']) {
     rejected: '신청 반려',
     cancelled: '취소',
     disputed: '분쟁',
+    no_show: '노쇼',
   };
 
   return labels[status];
