@@ -149,6 +149,11 @@ type RequesterRegistrationForm = {
 type ThemeMode = 'light' | 'dark';
 
 const adminRoles = new Set<Profile['role']>(['mediator', 'admin']);
+const demoLoginConfig = {
+  enabled: import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true',
+  email: import.meta.env.VITE_DEMO_HELPER_EMAIL as string | undefined,
+  password: import.meta.env.VITE_DEMO_HELPER_PASSWORD as string | undefined,
+};
 const helpCategoryOptions: HelpCategory[] = [
   'electronics',
   'labor',
@@ -188,6 +193,24 @@ function getInitialTheme(): ThemeMode {
   return 'light';
 }
 
+function isDemoHelperLoginRequested() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return new URLSearchParams(window.location.search).get('demo') === 'helper';
+}
+
+function clearDemoLoginParam() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete('demo');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthState>({
     session: null,
@@ -225,8 +248,48 @@ export function App() {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (mounted) {
+        if (
+          !data.session &&
+          isDemoHelperLoginRequested() &&
+          demoLoginConfig.enabled
+        ) {
+          if (!demoLoginConfig.email || !demoLoginConfig.password) {
+            setAuth({
+              session: null,
+              profile: null,
+              loading: false,
+              error: '데모 로그인 정보가 설정되어 있지 않습니다.',
+            });
+            return;
+          }
+
+          const result = await supabase.auth.signInWithPassword({
+            email: demoLoginConfig.email,
+            password: demoLoginConfig.password,
+          });
+
+          if (!mounted) {
+            return;
+          }
+
+          clearDemoLoginParam();
+
+          if (result.error) {
+            setAuth({
+              session: null,
+              profile: null,
+              loading: false,
+              error: result.error.message,
+            });
+            return;
+          }
+
+          void loadProfile(result.data.session);
+          return;
+        }
+
         void loadProfile(data.session);
       }
     });
@@ -268,6 +331,29 @@ export function App() {
   }
 
   if (!auth.session) {
+    if (auth.error) {
+      return (
+        <ScreenMessage
+          title="데모 로그인을 확인해야 합니다"
+          body={auth.error}
+          theme={theme}
+          onToggleTheme={() =>
+            setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+          }
+          actionLabel="일반 로그인으로 이동"
+          onAction={() => {
+            clearDemoLoginParam();
+            setAuth({
+              session: null,
+              profile: null,
+              loading: false,
+              error: null,
+            });
+          }}
+        />
+      );
+    }
+
     return (
       <LoginPage
         theme={theme}
