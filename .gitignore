@@ -15,3 +15,7 @@ dist
 .wrangler/tmp/pages-0KDMkb/functionsRoutes-0.09759922903169493.mjs
 .wrangler/tmp/pages-0KDMkb/functionsWorker-0.40778175643318293.mjs
 .wrangler/tmp/pages-0KDMkb/functionsWorker-0.40778175643318293.mjs.map
+
+.dev.vars*
+!.dev.vars.example
+!.env.example
